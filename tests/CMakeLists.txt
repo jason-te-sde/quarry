@@ -52,6 +52,13 @@ quarry_add_test(EvalProperty SOURCES unit/expr/eval_property_test.cc LIBS quarry
 # SQL error tests: tests/sql/*.test, run by one program against the TPC-H test data.
 quarry_add_test(SqlRunner SOURCES sql/sql_test_runner.cc LIBS quarry_binder)
 
+# The optimizer: rules, join order, cardinality, physical plan, and the plan goldens.
+quarry_add_test(Rules SOURCES unit/planner/rules_test.cc LIBS quarry_planner quarry_test_fixtures)
+quarry_add_test(JoinOrder SOURCES unit/planner/join_order_test.cc LIBS quarry_planner quarry_test_fixtures)
+quarry_add_test(Cardinality SOURCES unit/planner/cardinality_test.cc LIBS quarry_planner)
+quarry_add_test(PhysicalPlanner SOURCES unit/planner/physical_planner_test.cc LIBS quarry_planner quarry_test_fixtures)
+quarry_add_test(PlanGolden SOURCES planner/plan_golden_test.cc LIBS quarry_planner quarry_test_fixtures)
+
 # Tests of the repository's own check scripts. The objects test compiles two scratch files with
 # the C++ compiler this build uses.
 foreach(script hygiene layering objects)

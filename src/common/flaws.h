@@ -29,6 +29,14 @@ inline constexpr bool kFlawDecimalScaleSlip = true;
 inline constexpr bool kFlawDecimalScaleSlip = false;
 #endif
 
+#ifdef QUARRY_FLAW_JOIN_ORDER_DROPS_PREDICATE
+// When order_joins adds a relation that is reachable by two key pairs, it keeps only the first one:
+// the other equality is lost.
+inline constexpr bool kFlawJoinOrderDropsPredicate = true;
+#else
+inline constexpr bool kFlawJoinOrderDropsPredicate = false;
+#endif
+
 }  // namespace quarry
 
 #endif  // QUARRY_COMMON_FLAWS_H_

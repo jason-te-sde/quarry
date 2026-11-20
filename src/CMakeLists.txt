@@ -21,10 +21,14 @@ quarry_add_library(quarry_expr
           expr/eval_compare.cc expr/eval_logic.cc expr/eval_cast.cc
   LIBS quarry_vector quarry_types)
 quarry_add_library(quarry_parser SOURCES parser/ast.cc parser/lexer.cc parser/parser.cc)
-quarry_add_library(quarry_plan SOURCES plan/logical.cc LIBS quarry_expr)
+quarry_add_library(quarry_plan SOURCES plan/logical.cc plan/physical.cc plan/explain.cc
+  LIBS quarry_expr)
 quarry_add_library(quarry_binder SOURCES binder/catalog.cc binder/binder.cc
   LIBS quarry_parser quarry_types quarry_expr quarry_io quarry_plan)
-quarry_add_library(quarry_planner LIBS quarry_binder quarry_plan)
+quarry_add_library(quarry_planner
+  SOURCES planner/rules.cc planner/join_graph.cc planner/plan_util.cc planner/cardinality.cc
+          planner/physical_planner.cc
+  LIBS quarry_binder quarry_plan)
 quarry_add_library(quarry_io SOURCES io/parquet_scan.cc LIBS quarry_vector quarry::arrow)
 quarry_add_library(quarry_exec LIBS quarry_plan quarry_expr quarry_io)
 quarry_add_library(quarry_engine LIBS quarry_planner quarry_exec)

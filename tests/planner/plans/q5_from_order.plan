@@ -1,0 +1,14 @@
+Sort #0 [#1 DESC NULLS LAST] est=5
+  Project #1 [#0 AS n_name, #1 AS revenue] est=5
+    HashAggregate #2 [groups=[#12]; aggs=[SUM((#7 * (1.00 - CAST(#8 AS DECIMAL(16,2))))) -> DECIMAL(38,4)]] est=5
+      HashJoin #3 [probe_keys=#13; build_keys=#0] est=54
+        HashJoin #4 [probe_keys=#10; build_keys=#0] est=542
+          HashJoin #5 [probe_keys=#6, #1; build_keys=#0, #1] est=542
+            HashJoin #6 [probe_keys=#2; build_keys=#0] est=5416
+              HashJoin #7 [probe_keys=#0; build_keys=#1] est=1350
+                Scan #8 [customer; cols=c_custkey,c_nationkey] est=1500
+                Scan #9 [orders; cols=o_orderkey,o_custkey,o_orderdate; filter=((#2 >= DATE '1994-01-01') AND (#2 < DATE '1995-01-01')); prune=(#2 >= DATE '1994-01-01') AND (#2 < DATE '1995-01-01')] est=1350
+              Scan #10 [lineitem; cols=l_orderkey,l_suppkey,l_extendedprice,l_discount] est=60175
+            Scan #11 [supplier; cols=s_suppkey,s_nationkey] est=100
+          Scan #12 [nation; cols=n_nationkey,n_name,n_regionkey] est=25
+        Scan #13 [region; cols=r_regionkey,r_name; filter=(#1 = 'ASIA'); prune=(#1 = 'ASIA')] est=1
