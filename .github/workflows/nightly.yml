@@ -1,0 +1,51 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ARROW_VERSION: "26.0.1"
+
+jobs:
+  # 5,000 seeds instead of the 300 of every push. Scheduled runs of a private repository are metered,
+  # so the job runs only once the repository is public.
+  differential-nightly:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 gcc-14
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
+          key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Build quarry
+        run: |
+          cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DQUARRY_BUILD_TESTS=OFF
+          cmake --build build/ci --target quarry
+
+      - name: 5,000 seeds
+        run: uv run --locked tests/differential/run.py --quarry build/ci/tools/quarry --seeds 0:5000

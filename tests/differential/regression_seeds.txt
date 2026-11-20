@@ -1,0 +1,14 @@
+# Seeds that exposed a bug in quarry, since fixed. run.py always runs them first. A seed names the
+# queries the generator made for it when the bug was found: changing the generator changes them, so
+# the seeds below were chosen again against the unfixed engine whenever it did, and the unit test
+# that pins each bug lives in the module that owns it.
+#
+# 368, 934: DECIMAL -> DOUBLE divided the double of the unscaled value by 10^scale, which rounds
+#   twice above 2^53 and lands one ulp off (`x IN (1004036.4599609375)` missed rows of x).
+#   Fixed in DecimalToDouble (src/types/decimal.cc); test: DecimalTest.ToDoubleIsCorrectlyRounded.
+# 946: the literal -2147483648 next to an INTEGER operand is an INTEGER in DuckDB (so the sum
+#   overflows as one) and was a BIGINT in quarry. Fixed in NarrowLiteralToInteger
+#   (src/binder/binder.cc); test: BinderTest.IntegerMinimumLiteralFollowsDuckDbsTyping.
+368
+934
+946

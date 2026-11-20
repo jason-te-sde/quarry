@@ -21,6 +21,8 @@ build/dev/tools/quarry query --data tests/data/tpch-sf0.01 -f tests/tpch/queries
 
 `uv run scripts/gen_tpch.py` produces the test data and the DuckDB answers;
 `uv run scripts/gen_goldens.py` fills in the expected results of `tests/sql/results.test`.
+`uv run tests/differential/run.py --quarry build/dev/tools/quarry --seeds 0:300` runs random queries on
+random tables against DuckDB; [docs/testing.md](docs/testing.md) describes every layer of the tests.
 
 ## License
 

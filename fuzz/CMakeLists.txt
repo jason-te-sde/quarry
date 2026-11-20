@@ -2,6 +2,7 @@
 # AddressSanitizer and UBSan, which the QUARRY_FUZZ option insists on.
 #
 # Run one: build/fuzz/fuzz/fuzz_parser <corpus-dir> -max_total_time=60
+#          build/fuzz/fuzz/fuzz_query <corpus-dir> -max_total_time=60
 
 function(quarry_add_fuzz_target name)
   add_executable(${name} ${name}.cc)
@@ -13,3 +14,4 @@ function(quarry_add_fuzz_target name)
 endfunction()
 
 quarry_add_fuzz_target(fuzz_parser quarry_parser)
+quarry_add_fuzz_target(fuzz_query quarry_engine quarry::arrow)

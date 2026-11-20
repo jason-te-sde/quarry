@@ -252,13 +252,20 @@ jobs:
         run: cmake --preset fuzz
 
       - name: Build the fuzz targets
-        run: cmake --build build/fuzz --target fuzz_parser
+        run: cmake --build build/fuzz --target fuzz_parser fuzz_query
 
       - name: Fuzz the parser
         run: |
           mkdir -p build/fuzz/corpus-parser
           cp tests/tpch/queries/*.sql build/fuzz/corpus-parser/
           build/fuzz/fuzz/fuzz_parser build/fuzz/corpus-parser -max_total_time=60 -max_len=65536 \
+            -artifact_prefix=build/fuzz/crash-
+
+      # Bytes become a query over two fixed tables and run on an engine with chosen options.
+      - name: Fuzz the engine
+        run: |
+          mkdir -p build/fuzz/corpus-query
+          build/fuzz/fuzz/fuzz_query build/fuzz/corpus-query -max_total_time=60 -max_len=512 \
             -artifact_prefix=build/fuzz/crash-
 
       - name: Keep the failing input
@@ -268,6 +275,91 @@ jobs:
           name: fuzz-crash
           path: build/fuzz/crash-*
           if-no-files-found: ignore
+
+  # Seeded random tables and queries run on quarry and on DuckDB (pinned in uv.lock); the results
+  # must match. The generator's own tests run first: they fail when a grammar feature is starved.
+  differential:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 gcc-14
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
+          key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Build quarry
+        run: |
+          cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DQUARRY_BUILD_TESTS=OFF
+          cmake --build build/ci --target quarry
+
+      - name: Tests of the comparator and the generator
+        run: uv run --locked python -m unittest discover -s tests/differential -v
+
+      - name: 300 seeds
+        run: uv run --locked tests/differential/run.py --quarry build/ci/tools/quarry --seeds 0:300
+
+  # Every deliberate flaw must turn the suite red: scripts/run-flaws.sh builds quarry with one flaw
+  # and succeeds only when the tests that are meant to catch it fail.
+  flaws:
+    name: flaws (${{ matrix.flaw }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        flaw:
+          - selection_off_by_one
+          - null_as_false
+          - decimal_scale_slip
+          - join_order_drops_predicate
+          - drop_hash_collisions
+          - prune_wrong_bound
+          - spill_drops_last_batch
+          - spill_retains_rows
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 gcc-14
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
+          key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Build with the flaw and run the tests that must catch it
+        run: bash scripts/run-flaws.sh ${{ matrix.flaw }}
 
   # The macOS job runs only once the repository is public: macOS runners are metered while it is
   # private.
