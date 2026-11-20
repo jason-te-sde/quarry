@@ -163,7 +163,7 @@ class TopNOperator final : public Operator {
       column.nulls_first = key.nulls_first;
       sort_columns.push_back(std::move(column));
     }
-    ARROW_ASSIGN_OR_RAISE(RowComparator comparator, RowComparator::Make(std::move(sort_columns)));
+    ARROW_ASSIGN_OR_RAISE(RowComparator comparator, RowComparator::Make(sort_columns));
 
     const int64_t rows = all.empty() ? static_cast<int64_t>(seq.size()) : all[0]->length();
     if (rows > static_cast<int64_t>(UINT32_MAX)) {

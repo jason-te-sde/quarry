@@ -100,7 +100,7 @@ class SortOperator final : public Operator {
       column.nulls_first = key.nulls_first;
       sort_columns.push_back(std::move(column));
     }
-    ARROW_ASSIGN_OR_RAISE(RowComparator comparator, RowComparator::Make(std::move(sort_columns)));
+    ARROW_ASSIGN_OR_RAISE(RowComparator comparator, RowComparator::Make(sort_columns));
     order_.resize(static_cast<size_t>(rows));
     std::iota(order_.begin(), order_.end(), 0u);
     ARROW_RETURN_NOT_OK(charged_->Set(bytes + rows * static_cast<int64_t>(sizeof(uint32_t))));

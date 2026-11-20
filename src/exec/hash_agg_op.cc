@@ -21,6 +21,7 @@ class HashAggregateOperator final : public Operator {
     reservation_ =
         std::make_unique<Reservation>(*context.budget, ReservationOwner("HashAggregate", node_.id));
     std::vector<LogicalType> key_types;
+    key_types.reserve(node_.groups.size());
     for (const ExprPtr& group : node_.groups) key_types.push_back(group->type);
     std::vector<AggSpec> specs;
     specs.reserve(node_.aggregates.size());
