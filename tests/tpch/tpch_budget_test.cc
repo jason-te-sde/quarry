@@ -42,9 +42,7 @@ struct Case {
   int64_t budget;  // 0 = unlimited
 };
 
-void PrintTo(const Case& c, std::ostream* os) {
-  *os << "q" << c.query << " budget " << c.budget;
-}
+void PrintTo(const Case& c, std::ostream* os) { *os << "q" << c.query << " budget " << c.budget; }
 
 class TpchBudgetTest : public ::testing::TestWithParam<Case> {};
 

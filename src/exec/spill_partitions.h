@@ -28,7 +28,8 @@ namespace quarry {
 
 inline constexpr int kSpillFanout = 16;
 // A partition that still does not fit after being split this many times (so at depth 3, the fourth
-// split) fails with "resource exhausted": its rows share too much of their key hash to be separated.
+// split) fails with "resource exhausted": its rows share too much of their key hash to be
+// separated.
 inline constexpr int kMaxSpillDepth = 3;
 
 inline int PartitionOf(uint64_t hash, int depth) {

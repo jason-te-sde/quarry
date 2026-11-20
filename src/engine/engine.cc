@@ -92,8 +92,7 @@ struct Engine::Impl {
                                                ? std::filesystem::temp_directory_path(error)
                                                : options.spill_parent;
       if (error) {
-        return arrow::Status::IOError("cannot find a directory for spill files: ",
-                                      error.message());
+        return arrow::Status::IOError("cannot find a directory for spill files: ", error.message());
       }
       ARROW_ASSIGN_OR_RAISE(spill_directory, SpillDirectory::Create(parent));
     }

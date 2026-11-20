@@ -26,11 +26,11 @@ using testing::TempDir;
 using Clock = std::chrono::steady_clock;
 
 std::shared_ptr<arrow::Schema> AllTypesSchema() {
-  return arrow::schema({arrow::field("b", arrow::boolean()), arrow::field("i", arrow::int32()),
-                        arrow::field("l", arrow::int64()), arrow::field("d", arrow::decimal64(10, 2)),
-                        arrow::field("w", arrow::decimal128(30, 4)),
-                        arrow::field("f", arrow::float64()), arrow::field("t", arrow::date32()),
-                        arrow::field("s", arrow::utf8())});
+  return arrow::schema(
+      {arrow::field("b", arrow::boolean()), arrow::field("i", arrow::int32()),
+       arrow::field("l", arrow::int64()), arrow::field("d", arrow::decimal64(10, 2)),
+       arrow::field("w", arrow::decimal128(30, 4)), arrow::field("f", arrow::float64()),
+       arrow::field("t", arrow::date32()), arrow::field("s", arrow::utf8())});
 }
 
 Batch AllTypesBatch(int base) {
@@ -89,7 +89,8 @@ TEST(SpillTest, EveryTypeRoundTripsWithItsNulls) {
   for (const Batch& batch : ReadAll(file)) {
     ASSERT_EQ(batch.columns.size(), 8u);
     for (size_t c = 0; c < batch.columns.size(); ++c) {
-      EXPECT_TRUE(batch.columns[c]->type()->Equals(AllTypesSchema()->field(static_cast<int>(c))->type()));
+      EXPECT_TRUE(
+          batch.columns[c]->type()->Equals(AllTypesSchema()->field(static_cast<int>(c))->type()));
     }
     for (auto& row : RowTexts(batch)) actual.push_back(row);
   }
@@ -292,7 +293,8 @@ TEST_F(SpillCleanupTest, AFaultAtSpillWriteMidQueryReturnsItAndRemovesTheDirecto
   int writes = 0;
   EngineOptions options;
   options.spill_fault = [&](std::string_view site) {
-    if (site == "spill.write" && ++writes == 5) return arrow::Status::IOError("disk full (injected)");
+    if (site == "spill.write" && ++writes == 5)
+      return arrow::Status::IOError("disk full (injected)");
     return arrow::Status::OK();
   };
   auto engine = MakeEngine(options);
@@ -312,8 +314,7 @@ TEST_F(SpillCleanupTest, AFaultAtSpillReadAndSpillFinishAlsoRemoveTheDirectory) 
     auto engine = MakeEngine(options);
     auto result = engine->Execute(kSpillingQuery);
     ASSERT_FALSE(result.ok()) << site;
-    EXPECT_NE(result.status().message().find(std::string("injected at ") + site),
-              std::string::npos)
+    EXPECT_NE(result.status().message().find(std::string("injected at ") + site), std::string::npos)
         << result.status().ToString();
     EXPECT_TRUE(ParentIsEmpty()) << site;
   }
@@ -328,7 +329,8 @@ TEST_F(SpillCleanupTest, CancelWhileMergingPartitionsEndsPromptlyAndRemovesTheDi
 }
 
 TEST_F(SpillCleanupTest, CancelWhileAJoinPartitionsEndsPromptlyAndRemovesTheDirectory) {
-  ExpectCancelEndsPromptly("spill.write", "SELECT COUNT(*) FROM lineitem, orders WHERE l_orderkey = o_orderkey");
+  ExpectCancelEndsPromptly("spill.write",
+                           "SELECT COUNT(*) FROM lineitem, orders WHERE l_orderkey = o_orderkey");
 }
 
 TEST_F(SpillCleanupTest, ATimeoutWhileSpillingEndsAsCancelledAndRemovesTheDirectory) {
@@ -475,8 +477,10 @@ TEST(SpilledJoinTest, NullsDuplicatesAndStringKeysJoinLikeAnUnlimitedRun) {
         {arrow::field("s", arrow::utf8()), testing::StringArray(strings, nulls)},
         {arrow::field("v", arrow::int64()), testing::Int64Array(values)}};
   };
-  const fs::path build = testing::WriteParquet(data.path() / "t" / "b.parquet", make(9000, 3000, 10));
-  const fs::path probe = testing::WriteParquet(data.path() / "t" / "p.parquet", make(30000, 4000, 9));
+  const fs::path build =
+      testing::WriteParquet(data.path() / "t" / "b.parquet", make(9000, 3000, 10));
+  const fs::path probe =
+      testing::WriteParquet(data.path() / "t" / "p.parquet", make(30000, 4000, 9));
   for (const char* sql : {"SELECT COUNT(*), SUM(b.v), SUM(p.v) FROM probe_side p, build_side b "
                           "WHERE p.k = b.k",
                           "SELECT COUNT(*), SUM(b.v), SUM(p.v) FROM probe_side p, build_side b "

@@ -348,8 +348,8 @@ class AvgDoubleState final : public AggregateState {
   arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
                                                      arrow::MemoryPool* pool) const override {
     const std::vector<uint8_t> all(sums_.size(), 1);
-    ARROW_ASSIGN_OR_RAISE(
-        auto sums, MakeFixedArray<double>(arrow::float64(), sums_, all, first, count, pool));
+    ARROW_ASSIGN_OR_RAISE(auto sums,
+                          MakeFixedArray<double>(arrow::float64(), sums_, all, first, count, pool));
     ARROW_ASSIGN_OR_RAISE(
         auto counts, MakeFixedArray<int64_t>(arrow::int64(), counts_, all, first, count, pool));
     return std::vector<ArrayPtr>{std::move(sums), std::move(counts)};
@@ -400,9 +400,7 @@ class MinMaxState final : public AggregateState {
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(values_.capacity() * sizeof(T) + has_.capacity());
   }
-  std::vector<std::shared_ptr<arrow::DataType>> PartialTypes() const override {
-    return {type_};
-  }
+  std::vector<std::shared_ptr<arrow::DataType>> PartialTypes() const override { return {type_}; }
   arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
                                                      arrow::MemoryPool* pool) const override {
     ARROW_ASSIGN_OR_RAISE(auto values, Finish(first, count, pool));
@@ -733,9 +731,9 @@ std::vector<std::shared_ptr<arrow::DataType>> AggHashTable::PartialTypes() const
   return types;
 }
 
-arrow::Status AggHashTable::MergePartial(
-    const std::vector<std::shared_ptr<arrow::Array>>& keys,
-    const std::vector<std::shared_ptr<arrow::Array>>& partials, int64_t n) {
+arrow::Status AggHashTable::MergePartial(const std::vector<std::shared_ptr<arrow::Array>>& keys,
+                                         const std::vector<std::shared_ptr<arrow::Array>>& partials,
+                                         int64_t n) {
   std::vector<uint32_t> group_ids;
   ARROW_RETURN_NOT_OK(FindGroups(keys, n, &group_ids));
   size_t next = 0;

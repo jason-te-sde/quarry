@@ -108,8 +108,8 @@ class HashAggregateOperator final : public Operator {
       const int64_t step = std::max<int64_t>(1, StateSliceRows(*context_, rows));
       for (int64_t offset = 0; offset < rows; offset += step) {
         const int64_t length = std::min(step, rows - offset);
-        ARROW_RETURN_NOT_OK(table_->Update(Slice(keys, offset, length), Slice(args, offset, length),
-                                           length));
+        ARROW_RETURN_NOT_OK(
+            table_->Update(Slice(keys, offset, length), Slice(args, offset, length), length));
         if (table_->over_budget()) {
           if (first_spill_ == nullptr) {
             first_spill_ = NewPartitions(0);
@@ -142,8 +142,8 @@ class HashAggregateOperator final : public Operator {
   }
 
   std::unique_ptr<SpillPartitions> NewPartitions(int depth) {
-    return std::make_unique<SpillPartitions>(*context_, SpillSchema(table_->PartialTypes()),
-                                             "agg", depth);
+    return std::make_unique<SpillPartitions>(*context_, SpillSchema(table_->PartialTypes()), "agg",
+                                             depth);
   }
 
   // Writes every group's partial state to its partition and empties the table.
@@ -154,7 +154,8 @@ class HashAggregateOperator final : public Operator {
       const int64_t count = std::min(kChunk, table_->num_groups() - first);
       ARROW_ASSIGN_OR_RAISE(auto columns, table_->FinishPartial(first, count, context_->pool));
       std::vector<uint64_t> hashes(static_cast<size_t>(count));
-      for (int64_t i = 0; i < count; ++i) hashes[static_cast<size_t>(i)] = table_->KeyHash(first + i);
+      for (int64_t i = 0; i < count; ++i)
+        hashes[static_cast<size_t>(i)] = table_->KeyHash(first + i);
       ARROW_RETURN_NOT_OK(
           partitions->Append(MakeBatch(std::move(columns), count), hashes, nullptr));
     }
@@ -195,8 +196,8 @@ class HashAggregateOperator final : public Operator {
       for (int64_t offset = 0; offset < batch->length; offset += step) {
         const int64_t length = std::min(step, batch->length - offset);
         if (split != nullptr) {
-          ARROW_RETURN_NOT_OK(Forward(SliceBatch(*batch, offset, length), Slice(keys, offset, length),
-                                      split.get()));
+          ARROW_RETURN_NOT_OK(Forward(SliceBatch(*batch, offset, length),
+                                      Slice(keys, offset, length), split.get()));
           continue;
         }
         ARROW_RETURN_NOT_OK(table_->MergePartial(Slice(keys, offset, length),

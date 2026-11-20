@@ -65,7 +65,8 @@ arrow::Status PartitionTooLarge(const ExecContext& context, const std::string& o
       "resource exhausted: ", owner, " needs ", needed_bytes, " bytes, budget ",
       context.budget->limit(), ", in use ", context.budget->used(),
       ": a partition does not fit although the input was split by hash down to partition depth ",
-      depth, "; its rows share too much of their key hash to be separated (a heavily repeated "
+      depth,
+      "; its rows share too much of their key hash to be separated (a heavily repeated "
       "key?)");
 }
 

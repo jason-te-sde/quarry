@@ -98,8 +98,7 @@ class HashJoinOperator final : public Operator {
     if (!spilled_) return ConcatenateBuild();
     // The build side is in its partition files; split the probe side the same way and queue the
     // pairs.
-    ARROW_ASSIGN_OR_RAISE(auto probe_sink, SplitProbe(
-                                               [this]() { return probe_->Next(); }, 0));
+    ARROW_ASSIGN_OR_RAISE(auto probe_sink, SplitProbe([this]() { return probe_->Next(); }, 0));
     return QueuePairs(build_sink_.get(), probe_sink.get(), 0);
   }
 
@@ -259,9 +258,9 @@ class HashJoinOperator final : public Operator {
       return arrow::Status::OK();
     }
     ARROW_ASSIGN_OR_RAISE(auto probe_reader, SpillReader::Open(work.probe_path, context_->fault));
-    ARROW_ASSIGN_OR_RAISE(auto probe_sink, SplitProbe(
-                                               [&probe_reader]() { return probe_reader->Next(); },
-                                               sink_depth_));
+    ARROW_ASSIGN_OR_RAISE(
+        auto probe_sink,
+        SplitProbe([&probe_reader]() { return probe_reader->Next(); }, sink_depth_));
     probe_reader.reset();
     RemoveSpillFile(work.probe_path);
     return QueuePairs(build_sink_.get(), probe_sink.get(), sink_depth_);

@@ -226,8 +226,8 @@ TEST(AggHashTableTest, MemoryIsChargedToTheReservationAndRefusedOverTheLimit) {
       << status.message();
 }
 
-// Partial states: what a spilling aggregate writes out and merges back must give the answer a single
-// table gives over all the rows.
+// Partial states: what a spilling aggregate writes out and merges back must give the answer a
+// single table gives over all the rows.
 struct PartialInput {
   std::vector<LogicalType> types;  // the argument type of each aggregate
   std::vector<AggFunc> funcs;

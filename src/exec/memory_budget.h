@@ -15,10 +15,10 @@ namespace quarry {
 // reported in the scan's profile. A limit of 0 means unlimited.
 //
 // The counters live in a state object that every Reservation shares with the budget, so an operator
-// destroyed after the budget (an error path that unwinds in the wrong order) still returns its bytes
-// to live memory. The alternative, aborting when a budget dies with reservations outstanding, only
-// checks the order in debug builds and turns a lifetime slip into a crash; sharing makes the slip
-// impossible in every build for the price of one reference count per reservation.
+// destroyed after the budget (an error path that unwinds in the wrong order) still returns its
+// bytes to live memory. The alternative, aborting when a budget dies with reservations outstanding,
+// only checks the order in debug builds and turns a lifetime slip into a crash; sharing makes the
+// slip impossible in every build for the price of one reference count per reservation.
 class MemoryBudget {
  public:
   explicit MemoryBudget(int64_t limit_bytes) : state_(std::make_shared<State>(limit_bytes)) {}

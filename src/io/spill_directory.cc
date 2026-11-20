@@ -1,12 +1,11 @@
 #include "io/spill_directory.h"
 
 #include <arrow/status.h>
+#include <unistd.h>
 
 #include <cerrno>
 #include <cstdlib>
 #include <string>
-
-#include <unistd.h>
 #include <system_error>
 
 namespace quarry {
