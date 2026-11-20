@@ -9,6 +9,7 @@
 
 #include "exec/build_operators.h"
 #include "support/exec_helpers.h"
+#include "support/parquet_fixture.h"
 #include "support/vector_source.h"
 
 namespace quarry {
@@ -643,6 +644,73 @@ TEST(BuildOperatorsTest, APassedDeadlineIsCancelledAndNamesTheTimeout) {
   EXPECT_TRUE(batches.status().IsCancelled());
   EXPECT_NE(batches.status().message().find("timeout of 1 ms"), std::string::npos)
       << batches.status().message();
+}
+
+// ---- memory accounting of sliced batches ----
+
+// One row group of 20,000 rows read in batches of 100: every batch is a slice of the whole row
+// group, so charging a slice for the buffers it was cut from would charge the row group 200 times.
+class SlicedAccountingTest : public ::testing::Test {
+ protected:
+  static constexpr int64_t kRows = 20000;
+
+  void SetUp() override {
+    std::vector<int64_t> ids;
+    std::vector<std::string> names;
+    for (int64_t i = 0; i < kRows; ++i) {
+      ids.push_back(i);
+      names.push_back("row-" + std::to_string(100000 + i));
+    }
+    const auto file = testing::WriteParquetRowGroups(
+        dir_.path() / "t.parquet",
+        {testing::Int64Column("id", ids), testing::StringColumn("s", names)}, kRows);
+    ASSERT_TRUE(catalog_.AddTable("t", {file}).ok());
+  }
+
+  // The peak state bytes of the operator named `name` after running `sql` with batches of 100.
+  int64_t PeakOf(const std::string& sql, const std::string& name) {
+    auto plan = testing::PlanQuery(sql, catalog_);
+    EXPECT_TRUE(plan.ok()) << plan.status().ToString();
+    if (!plan.ok()) return -1;
+    TestContext context(100);
+    auto op = BuildOperators(**plan, context.context);
+    EXPECT_TRUE(op.ok());
+    if (!op.ok()) return -1;
+    auto batches = Drain(**op, context.context);
+    EXPECT_TRUE(batches.ok()) << batches.status().ToString();
+    int64_t peak = -1;
+    for (const OperatorStats& s : CollectOperatorStats(**op)) {
+      if (s.name == name) peak = std::max(peak, s.peak_state_bytes);
+    }
+    return peak;
+  }
+
+  testing::TempDir dir_;
+  Catalog catalog_;
+};
+
+TEST_F(SlicedAccountingTest, SortChargesTheDataItHoldsNotTheRowGroupPerBatch) {
+  // id 8 B + name offsets 4 B + name bytes 10 B per row, plus the 4-byte permutation.
+  const int64_t held = kRows * (8 + 4 + 10 + 4);
+  const int64_t peak = PeakOf("SELECT id, s FROM t ORDER BY id DESC", "Sort");
+  EXPECT_GT(peak, held * 9 / 10);
+  EXPECT_LE(peak, held * 3 / 2);
+}
+
+TEST_F(SlicedAccountingTest, TopNChargesOnlyItsBuffer) {
+  // At most 2 * max(n, batch size) = 200 rows are buffered next to the best n.
+  const int64_t buffered = 2 * 100 * (8 + 4 + 10 + 8);
+  const int64_t peak = PeakOf("SELECT id, s FROM t ORDER BY id DESC LIMIT 10", "TopN");
+  EXPECT_GT(peak, 0);
+  EXPECT_LE(peak, buffered * 3 / 2);
+}
+
+TEST_F(SlicedAccountingTest, TheHashJoinBuildChargesItsPayloadPlusTheTable) {
+  // Build side: the 8-byte key column (20,000 rows) and the hash table over 20,000 distinct keys,
+  // about 1 MB; the row group is 20,000 * 22 bytes and was charged 200 times by the old accounting.
+  const int64_t peak = PeakOf("SELECT COUNT(*) FROM t a JOIN t b ON a.id = b.id", "HashJoin");
+  EXPECT_GT(peak, kRows * 8);
+  EXPECT_LE(peak, 3 * 1000 * 1000);
 }
 
 }  // namespace

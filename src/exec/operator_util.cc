@@ -2,10 +2,16 @@
 
 #include <arrow/array/concatenate.h>
 #include <arrow/array/util.h>
+#include <arrow/util/byte_size.h>
 
 namespace quarry {
 
 int64_t ArrayBytes(const arrow::Array& array) {
+  // The bytes the array references, offset and length respected: a batch that is a slice of a
+  // whole row group is charged for its own rows, not for the row group. (A retained slice does keep
+  // the row group alive; that memory is the scan's buffer, reported as scan_buffer_bytes.)
+  auto referenced = arrow::util::ReferencedBufferSize(array);
+  if (referenced.ok()) return *referenced;
   int64_t bytes = 0;
   for (const auto& buffer : array.data()->buffers) {
     if (buffer != nullptr) bytes += buffer->size();
