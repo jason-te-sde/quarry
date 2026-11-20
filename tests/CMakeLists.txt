@@ -23,6 +23,21 @@ endforeach()
 
 quarry_add_test(parquet_metadata SOURCES unit/io/parquet_metadata_test.cc LIBS quarry_io)
 
+# Test-only support: Values, and the row-at-a-time reference evaluator the property test compares
+# the vectorized evaluator against.
+quarry_add_library(quarry_test_support
+  SOURCES support/value.cc support/reference_eval.cc
+  LIBS quarry_expr)
+target_include_directories(quarry_test_support PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+
+# The names start with a capital so that `ctest -R 'Type|Decimal|Date|Selection|Eval'` finds them.
+quarry_add_test(Decimal SOURCES unit/types/decimal_test.cc LIBS quarry_types)
+quarry_add_test(Date SOURCES unit/types/date_test.cc LIBS quarry_types)
+quarry_add_test(TypeRules SOURCES unit/types/type_rules_test.cc LIBS quarry_types)
+quarry_add_test(Selection SOURCES unit/vector/selection_test.cc LIBS quarry_vector quarry_test_support)
+quarry_add_test(Eval SOURCES unit/expr/eval_test.cc LIBS quarry_expr quarry_test_support)
+quarry_add_test(EvalProperty SOURCES unit/expr/eval_property_test.cc LIBS quarry_expr quarry_test_support)
+
 # Tests of the repository's own check scripts. The objects test compiles two scratch files with
 # the C++ compiler this build uses.
 foreach(script hygiene layering objects)
