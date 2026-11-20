@@ -1,0 +1,160 @@
+name: ci
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ARROW_VERSION: "26.0.1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      # The whole history, so that check-hygiene.sh scans every commit message.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build clang-18 clang-tidy-18 clang-format-18
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-clang-18
+          key: arrow-${{ env.ARROW_VERSION }}-clang-18-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: bash scripts/build_arrow.sh
+
+      - name: clang-format
+        run: git ls-files -z -- '*.h' '*.cc' | xargs -0 -r clang-format-18 --dry-run --Werror
+
+      - name: Layering
+        run: bash scripts/check-layering.sh
+
+      - name: Hygiene
+        run: bash scripts/check-hygiene.sh
+
+      - name: Hygiene script test
+        run: bash tests/scripts/hygiene_test.sh
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: >
+          cmake -S . -B build/lint -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DQUARRY_BUILD_TESTS=OFF
+
+      - name: clang-tidy
+        run: >
+          git ls-files -z -- 'src/*.cc' 'tools/*.cc'
+          | xargs -0 -r clang-tidy-18 -p build/lint --quiet -warnings-as-errors='*'
+
+  build-test:
+    name: build-test (${{ matrix.compiler }}, ${{ matrix.build_type }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc-14, clang-18]
+        build_type: [Debug, Release]
+    env:
+      COMPILER: ${{ matrix.compiler }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          case "$COMPILER" in
+            gcc-*)
+              package="g++-${COMPILER#gcc-}"
+              echo "CC=$COMPILER" >> "$GITHUB_ENV"
+              echo "CXX=g++-${COMPILER#gcc-}" >> "$GITHUB_ENV"
+              ;;
+            clang-*)
+              package="$COMPILER"
+              echo "CC=$COMPILER" >> "$GITHUB_ENV"
+              echo "CXX=clang++-${COMPILER#clang-}" >> "$GITHUB_ENV"
+              ;;
+          esac
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build "$package"
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-${{ matrix.compiler }}
+          key: arrow-${{ env.ARROW_VERSION }}-${{ matrix.compiler }}-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Configure
+        run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build/ci
+
+      - name: Test
+        run: ctest --test-dir build/ci --output-on-failure --no-tests=error
+
+  # The macOS job runs only once the repository is public: macOS runners are metered while it is
+  # private.
+  build-test-macos:
+    if: github.event.repository.private == false
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew install ninja
+
+      - name: Detect the compiler id
+        run: |
+          major="$(c++ --version | head -n 1 | sed -E 's/.*version ([0-9]+).*/\1/')"
+          echo "COMPILER_ID=appleclang-$major" >> "$GITHUB_ENV"
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-${{ env.COMPILER_ID }}
+          key: arrow-${{ env.ARROW_VERSION }}-${{ env.COMPILER_ID }}-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Configure
+        run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/ci
+
+      - name: Test
+        run: ctest --test-dir build/ci --output-on-failure --no-tests=error
