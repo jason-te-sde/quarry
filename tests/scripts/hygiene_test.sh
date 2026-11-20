@@ -35,7 +35,11 @@ commit_all() { # <dir> <message>
 # expect_status <case> <dir> <expected status>
 expect_status() {
   local name=$1 dir=$2 expected=$3 status
-  bash "$script" "$dir" >/dev/null 2>&1
+  # The script that runs is the copy in the repository under test, so that a case can damage the
+  # files next to it (the patterns file); a directory without a copy gets the real one.
+  local runner="$script"
+  [ -f "$dir/scripts/check-hygiene.sh" ] && runner="$dir/scripts/check-hygiene.sh"
+  bash "$runner" "$dir" >/dev/null 2>&1
   status=$?
   if [ "$status" -ne "$expected" ]; then
     echo "FAIL: $name: expected exit $expected, got $status"
@@ -79,6 +83,46 @@ expect_status "absolute home path in a tracked file fails" "$dir" 1
 dir="$(make_repo abs-path-message)"
 commit_all "$dir" "read /ho""me/someone/x"
 expect_status "absolute home path in a commit message fails" "$dir" 1
+
+# The fail-closed branches of the script itself. A check that cannot load its patterns must say so
+# rather than print "ok" having scanned for nothing.
+patterns_of() { printf '%s\n' "$1/scripts/attribution-patterns.txt"; }
+
+dir="$(make_repo patterns-empty)"
+printf '# only a comment\n\n' >"$(patterns_of "$dir")"
+commit_all "$dir" "add a file"
+expect_status "an attribution-patterns file without patterns fails" "$dir" 1
+
+dir="$(make_repo patterns-missing)"
+rm "$(patterns_of "$dir")"
+commit_all "$dir" "add a file"
+expect_status "a missing attribution-patterns file fails" "$dir" 1
+
+dir="$(make_repo patterns-bad-regex)"
+printf 'first credit\nsecond credit\nthird credit\nfourth credit\nbroken(\n' >"$(patterns_of "$dir")"
+commit_all "$dir" "add a file"
+expect_status "an uncompilable attribution pattern fails" "$dir" 1
+
+dir="$(make_repo patterns-unreadable)"
+commit_all "$dir" "add a file"
+chmod 000 "$(patterns_of "$dir")"
+if [ -r "$(patterns_of "$dir")" ]; then
+  echo "skip: an unreadable patterns file fails (the user can read it anyway)"
+else
+  expect_status "an unreadable attribution-patterns file fails" "$dir" 1
+fi
+chmod 644 "$(patterns_of "$dir")"
+
+dir="$(make_repo unreadable-tracked)"
+printf 'int x;\n' >"$dir/secret.cc"
+commit_all "$dir" "add a file"
+chmod 000 "$dir/secret.cc"
+if [ -r "$dir/secret.cc" ]; then
+  echo "skip: an unreadable tracked file fails (the user can read it anyway)"
+else
+  expect_status "an unreadable tracked file fails" "$dir" 1
+fi
+chmod 644 "$dir/secret.cc"
 
 # A directory that is not a git working tree has nothing to check, which is status 2, never "ok".
 mkdir -p "$work/not-a-repo"

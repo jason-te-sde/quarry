@@ -23,7 +23,12 @@ endforeach()
 
 quarry_add_test(parquet_metadata SOURCES unit/io/parquet_metadata_test.cc LIBS quarry_io)
 
-add_test(NAME hygiene_script
-  COMMAND ${QUARRY_BASH} "${PROJECT_SOURCE_DIR}/tests/scripts/hygiene_test.sh"
-  WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
-set_tests_properties(hygiene_script PROPERTIES TIMEOUT 120)
+# Tests of the repository's own check scripts. The objects test compiles two scratch files with
+# the C++ compiler this build uses.
+foreach(script hygiene layering objects)
+  add_test(NAME ${script}_script
+    COMMAND ${CMAKE_COMMAND} -E env "CXX=${CMAKE_CXX_COMPILER}"
+      ${QUARRY_BASH} "${PROJECT_SOURCE_DIR}/tests/scripts/${script}_test.sh"
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
+  set_tests_properties(${script}_script PROPERTIES TIMEOUT 120)
+endforeach()

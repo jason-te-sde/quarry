@@ -8,6 +8,7 @@
 #      kernels, so that the engine is the thing that is measured (docs/design/0003-arrow-boundary.md)
 #   3. no Arrow or Parquet header in src/parser: the parser has no Arrow
 #   4. library code does not write to stdout or stderr, and nothing throws
+# The ban of rule 2 on compiled code is scripts/check-objects.sh, which runs after the build.
 # `root` defaults to the repository root. A violation is printed as `path:line: message`.
 #
 # The script fails closed. Exit status: 0 clean, 1 violations, 2 nothing to check. A directory of
@@ -53,6 +54,24 @@ layer_allows() {
   esac
 }
 
+# grep_lines <grep options> <regex> <file>: leaves the numbered matching lines in $matches. Status 1
+# is "no match"; anything above 1 (an unreadable file, a bad pattern) is a failure of the check
+# itself and ends it, because a scan that could not read a file must not say "ok".
+matches=""
+grep_lines() {
+  local status errfile
+  errfile="$(mktemp)"
+  matches="$(grep "-n$1" -e "$2" -- "$3" 2>"$errfile")"
+  status=$?
+  if [ "$status" -gt 1 ]; then
+    echo "check-layering: grep failed with status $status on $3" >&2
+    cat "$errfile" >&2
+    rm -f "$errfile"
+    exit 1
+  fi
+  rm -f "$errfile"
+}
+
 include_re='^[[:space:]]*#[[:space:]]*include[[:space:]]*(["<])([^">]+)[">]'
 
 layer_of() { # <file>
@@ -94,6 +113,7 @@ check_includes() {
       return
     fi
   fi
+  grep_lines E '^[[:space:]]*#[[:space:]]*include' "$file"
   while IFS=: read -r lineno text; do
     [[ $text =~ $include_re ]] || continue
     kind="${BASH_REMATCH[1]}"
@@ -132,33 +152,41 @@ check_includes() {
         esac
         ;;
     esac
-  done < <(grep -nE '^[[:space:]]*#[[:space:]]*include' "$file")
+  done <<<"$matches"
 }
 
 # scan_code <file> <regex> <message>: reports each line whose code (not comment, not string) matches.
 scan_code() {
   local file=$1 re=$2 message=$3 lineno text trimmed code
+  grep_lines E "$re" "$file"
   while IFS=: read -r lineno text; do
+    [ -n "$lineno" ] || continue
     trimmed="$(trim "$text")"
     is_comment_line "$trimmed" && continue
     code="$(code_of "$text")"
     [[ $code =~ $re ]] || continue
     report "$file" "$lineno" "$message"
-  done < <(grep -nE "$re" "$file")
+  done <<<"$matches"
 }
 
 output_re='std::(cout|cerr)([^[:alnum:]_]|$)|(^|[^[:alnum:]_])(printf|fprintf|puts)[[:space:]]*\('
 throw_re='(^|[^[:alnum:]_])throw([^[:alnum:]_]|$)'
 compute_re='arrow::compute([^[:alnum:]_]|$)'
 
+files="$(find "${dirs[@]}" -type f \( -name '*.h' -o -name '*.hpp' -o -name '*.cc' -o -name '*.cpp' \) | sort)" || {
+  echo "check-layering: find failed under ${dirs[*]}" >&2
+  exit 1
+}
+
 checked=0
 while IFS= read -r file; do
+  [ -n "$file" ] || continue
   checked=$((checked + 1))
   check_includes "$file" "$(layer_of "$file")"
   scan_code "$file" "$compute_re" "arrow::compute is banned: quarry has its own kernels"
   scan_code "$file" "$output_re" "library code must not write to stdout or stderr"
   scan_code "$file" "$throw_re" "nothing under include/ or src/ may throw: errors are returned as a Status"
-done < <(find "${dirs[@]}" -type f \( -name '*.h' -o -name '*.hpp' -o -name '*.cc' -o -name '*.cpp' \) | sort)
+done <<<"$files"
 
 if [ "$checked" -eq 0 ]; then
   echo "check-layering: no C++ files under ${dirs[*]} in $root" >&2

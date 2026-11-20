@@ -56,6 +56,9 @@ jobs:
       - name: Hygiene script test
         run: bash tests/scripts/hygiene_test.sh
 
+      - name: Layering script test
+        run: bash tests/scripts/layering_test.sh
+
       - name: Configure
         env:
           CC: clang-18
@@ -117,6 +120,10 @@ jobs:
       - name: Build
         run: cmake --build build/ci
 
+      # The compiled half of the arrow::compute ban: no object of quarry's own may reference it.
+      - name: Check the objects for arrow::compute
+        run: bash scripts/check-objects.sh build/ci
+
       - name: Test
         run: ctest --test-dir build/ci --output-on-failure --no-tests=error
 
@@ -155,6 +162,10 @@ jobs:
 
       - name: Build
         run: cmake --build build/ci
+
+      # The compiled half of the arrow::compute ban: no object of quarry's own may reference it.
+      - name: Check the objects for arrow::compute
+        run: bash scripts/check-objects.sh build/ci
 
       - name: Test
         run: ctest --test-dir build/ci --output-on-failure --no-tests=error
