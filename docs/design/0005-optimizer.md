@@ -46,8 +46,9 @@ against a row group's min/max. The predicate itself is always applied as well; p
 work.
 
 A comma join with a relation that no chain of equalities connects to the first is a planning error,
-`planner error at 1:1: requires a cross product between <a> and <b>`: the engine does not build a
-cross product. The plan carries no source positions, so the position is always 1:1.
+`planner error at <line>:<column>: requires a cross product between <a> and <b>`: the engine does not build a
+cross product. The position is where `<b>`, the relation that cannot be reached, is written in the query: each
+scan of the logical plan carries the position of its FROM item.
 
 Passes that change a node's column layout (join order, build side, column pruning) return a map from
 old to new output index, and the parent redirects its expressions through it, so that an expression

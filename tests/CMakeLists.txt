@@ -58,6 +58,12 @@ quarry_add_test(JoinOrder SOURCES unit/planner/join_order_test.cc LIBS quarry_pl
 quarry_add_test(Cardinality SOURCES unit/planner/cardinality_test.cc LIBS quarry_planner)
 quarry_add_test(PhysicalPlanner SOURCES unit/planner/physical_planner_test.cc LIBS quarry_planner quarry_test_fixtures)
 quarry_add_test(PlanGolden SOURCES planner/plan_golden_test.cc LIBS quarry_planner quarry_test_fixtures)
+# Rewriting goldens under CI must fail, not rewrite: run the golden test that way and expect it to
+# fail, with the golden files left alone.
+add_test(NAME PlanGolden_refuses_update_in_ci
+  COMMAND ${CMAKE_COMMAND} -E env UPDATE_GOLDENS=1 CI=1 $<TARGET_FILE:PlanGolden_test>
+  WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
+set_tests_properties(PlanGolden_refuses_update_in_ci PROPERTIES WILL_FAIL TRUE TIMEOUT 300)
 
 # Tests of the repository's own check scripts. The objects test compiles two scratch files with
 # the C++ compiler this build uses.

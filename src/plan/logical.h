@@ -60,6 +60,9 @@ struct LogicalScan : LogicalNode {
   std::vector<std::optional<LogicalType>> table_column_types;
   std::vector<int> columns;
   std::vector<ExprPtr> filters;
+  // Where the relation is written in the SQL text, for planner errors.
+  int line = 1;
+  int column = 1;
 
   std::vector<LogicalType> output_types() const override;
   std::string ToString(int indent = 0) const override;

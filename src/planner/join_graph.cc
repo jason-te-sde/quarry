@@ -39,6 +39,16 @@ std::string RelationName(const LogicalNode& node) {
   return out + ")";
 }
 
+// "<line>:<column>" of the first table the relation reads, in the order of the SQL text.
+std::string RelationPosition(const LogicalNode& node) {
+  if (node.kind == LogicalKind::kScan) {
+    const auto& scan = static_cast<const LogicalScan&>(node);
+    return std::to_string(scan.line) + ":" + std::to_string(scan.column);
+  }
+  const std::vector<const LogicalNode*> children = ChildrenOf(node);
+  return children.empty() ? "1:1" : RelationPosition(*children[0]);
+}
+
 // The relation a column of the concatenated output belongs to.
 size_t RelationOf(const std::vector<size_t>& offsets, int column) {
   size_t r = 0;
@@ -117,8 +127,9 @@ arrow::Result<JoinTree> BuildJoinTree(std::vector<LogicalPlan> relations,
   for (size_t r = 1; r < n; ++r) {
     if (!reached[r]) {
       return arrow::Status::Invalid(
-          "planner error at 1:1: requires a cross product between " + RelationName(*relations[0]) +
-          " and " + RelationName(*relations[r]) + ": add an equality predicate that joins them");
+          "planner error at " + RelationPosition(*relations[r]) +
+          ": requires a cross product between " + RelationName(*relations[0]) + " and " +
+          RelationName(*relations[r]) + ": add an equality predicate that joins them");
     }
   }
 

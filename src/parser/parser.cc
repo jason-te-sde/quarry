@@ -246,6 +246,7 @@ class Parser {
     if (item.has_alias) {
       item.alias_quoted = Cur().quoted;
       item.alias = item.alias_quoted ? Cur().text : Lower(Cur().text);
+      item.alias_written = Cur().text;
       Advance();
     }
     stmt->items.push_back(std::move(item));
@@ -566,6 +567,7 @@ class Parser {
     auto e = NewExpr(ExprKind::kColumn, t);
     e->quoted = t.quoted;
     e->text = t.quoted ? t.text : Lower(t.text);
+    e->written = t.text;
     Advance();
     if (Cur().kind == TokenKind::kDot && PeekAt(1).kind == TokenKind::kIdentifier) {
       Advance();
@@ -574,6 +576,7 @@ class Parser {
       e->qualifier_quoted = e->quoted;
       e->quoted = Cur().quoted;
       e->text = Cur().quoted ? Cur().text : Lower(Cur().text);
+      e->written = Cur().text;
       Advance();
     }
     return e;

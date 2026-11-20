@@ -1,6 +1,7 @@
 // Plans of the TPC-H queries against the SF0.01 catalog, as Explain prints them, compared with
 // tests/planner/plans/*.plan. UPDATE_GOLDENS=1 rewrites the files; review the diff before
-// committing.
+// committing. With CI set as well it fails instead: CI must never rewrite what it compares
+// against.
 
 #include <gtest/gtest.h>
 
@@ -36,6 +37,10 @@ void CheckGolden(const std::string& name, const std::string& actual) {
   const std::string path = "tests/planner/plans/" + name + ".plan";
   const char* update = std::getenv("UPDATE_GOLDENS");
   if (update != nullptr && std::string(update) == "1") {
+    if (std::getenv("CI") != nullptr) {
+      ADD_FAILURE() << "UPDATE_GOLDENS=1 is refused when CI is set; update the goldens locally";
+      return;
+    }
     std::ofstream out(path, std::ios::trunc);
     ASSERT_TRUE(out.good()) << path;
     out << actual;

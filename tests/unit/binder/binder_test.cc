@@ -64,12 +64,22 @@ const LogicalProject& TopProject(const LogicalPlan& plan) {
   return As<LogicalProject>(plan, LogicalKind::kProject);
 }
 
+TEST(BinderTest, OutputNamesKeepTheCaseTheUserTyped) {
+  const auto plan = MustBind("SELECT L_QUANTITY, l_tax AS MyTax FROM lineitem ORDER BY mytax");
+  ASSERT_NE(plan, nullptr);
+  const auto& sort = As<LogicalSort>(plan, LogicalKind::kSort);
+  const auto& project = As<LogicalProject>(sort.child, LogicalKind::kProject);
+  ASSERT_EQ(project.names.size(), 2u);
+  EXPECT_EQ(project.names[0], "L_QUANTITY");
+  EXPECT_EQ(project.names[1], "MyTax");
+}
+
 TEST(BinderTest, UnquotedIdentifiersAreCaseInsensitive) {
   const auto plan = MustBind("SELECT L_QUANTITY FROM LineItem");
   ASSERT_NE(plan, nullptr);
   const LogicalProject& project = TopProject(plan);
   ASSERT_EQ(project.exprs.size(), 1u);
-  EXPECT_EQ(project.names[0], "l_quantity");
+  EXPECT_EQ(project.names[0], "L_QUANTITY");
   EXPECT_EQ(project.exprs[0]->type.ToString(), "DECIMAL(15,2)");
   const auto types = plan->output_types();
   ASSERT_EQ(types.size(), 1u);

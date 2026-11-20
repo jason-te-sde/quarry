@@ -266,6 +266,8 @@ arrow::Result<Binder::BoundFrom> Binder::BindTable(const ast::FromItem& item) {
   auto scan = std::make_unique<LogicalScan>();
   scan->table = table;
   scan->table_name = table->name;
+  scan->line = item.pos.line;
+  scan->column = item.pos.column;
   ScopeTable scope_table;
   scope_table.alias = item.has_alias ? item.alias : item.table;
   scope_table.pos = item.pos;
@@ -698,9 +700,9 @@ arrow::Result<LogicalPlan> Binder::Run(const ast::SelectStmt& stmt) {
   for (const ast::SelectItem& item : stmt.items) {
     ARROW_ASSIGN_OR_RAISE(ExprPtr bound, BindExpr(*item.expr, ctx));
     if (item.has_alias) {
-      names.push_back(item.alias);
+      names.push_back(item.alias_written);
     } else if (item.expr->kind == AstKind::kColumn) {
-      names.push_back(item.expr->text);
+      names.push_back(item.expr->written);
     } else {
       names.push_back(item.source_text);
     }

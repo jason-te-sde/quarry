@@ -54,6 +54,9 @@ struct Expr {
   // An identifier written without quotes is stored lower-cased; a quoted one is stored as
   // written, and `quoted` records which it was.
   bool quoted = false;
+  // For a column reference: the column name exactly as written, which names the output column
+  // (DuckDB keeps the case the user typed).
+  std::string written;
   bool has_qualifier = false;
   std::string qualifier;
   bool qualifier_quoted = false;
@@ -77,7 +80,8 @@ struct SelectItem {
   // The source text of the expression, used to name a column that has no alias.
   std::string source_text;
   bool has_alias = false;
-  std::string alias;  // lower-cased unless alias_quoted
+  std::string alias;          // lower-cased unless alias_quoted
+  std::string alias_written;  // as written; names the output column
   bool alias_quoted = false;
 };
 

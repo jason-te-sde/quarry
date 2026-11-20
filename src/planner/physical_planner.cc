@@ -97,7 +97,8 @@ arrow::Result<PhysicalPlan> ConvertScan(const LogicalScan& scan, bool prune_row_
     const size_t index = static_cast<size_t>(c);
     const std::optional<LogicalType>& type = scan.table_column_types[index];
     if (!type.has_value()) {
-      return arrow::Status::Invalid("planner error at 1:1: scan of " + scan.table_name +
+      return arrow::Status::Invalid("planner error at " + std::to_string(scan.line) + ":" +
+                                    std::to_string(scan.column) + ": scan of " + scan.table_name +
                                     " lists column " + scan.table_column_names[index] +
                                     ", which has no supported type");
     }

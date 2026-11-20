@@ -32,8 +32,9 @@ arrow::Status ValidateRuleNames(const std::set<std::string>& names);
 // Rewrites a bound plan: fold_constants, push_filters, join construction (always on), order_joins,
 // pick_build_side, prune_columns, in that order, each skipped when disabled. The result produces
 // the same rows as the input, in the same column order. A comma join whose relations are not
-// connected by equality predicates is Invalid: "planner error at 1:1: requires a cross product
-// between <a> and <b>" (the plan carries no source positions). See docs/design/0005-optimizer.md.
+// connected by equality predicates is Invalid: "planner error at <line>:<column>: requires a cross
+// product between <a> and <b>", the position being where <b>, the relation that cannot be reached,
+// is written in the SQL text. See docs/design/0005-optimizer.md.
 arrow::Result<LogicalPlan> Optimize(LogicalPlan plan, const PlannerOptions& options);
 
 }  // namespace quarry

@@ -25,7 +25,8 @@ struct JoinTree {
 // `x = y`, where x uses columns of one relation and y of another, is an edge of the join graph and
 // becomes a key pair of the join that brings the second of the two relations in; the others come
 // back in `leftover`. A relation not connected to the first one through edges is Invalid:
-// "planner error at 1:1: requires a cross product between <first> and <unreached>".
+// "planner error at <line>:<column>: requires a cross product between <first> and <unreached>", the
+// position being that of the unreached relation in the SQL text.
 //
 // `greedy` picks the order: start from the relation with the smallest estimate, then keep adding
 // the connected relation that gives the smallest estimated join result (ties: the earlier one in

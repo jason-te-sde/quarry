@@ -107,6 +107,15 @@ TEST(JoinOrderTest, ACommaJoinWithoutAPredicateIsAPlannerError) {
               HasSubstr("requires a cross product between nation and region"));
 }
 
+TEST(JoinOrderTest, ThePlannerErrorCarriesThePositionOfTheUnreachedRelation) {
+  // `region` is on line 3, column 6: that is where the error points.
+  auto plan = Optimize(MustBind("SELECT n_name\nFROM nation,\n     region\nWHERE n_nationkey > 1"),
+                       PlannerOptions{});
+  ASSERT_FALSE(plan.ok());
+  EXPECT_THAT(plan.status().message(), ::testing::StartsWith("planner error at 3:6: "));
+  EXPECT_THAT(plan.status().message(), HasSubstr("between nation and region"));
+}
+
 TEST(JoinOrderTest, ACrossProductIsRefusedWhateverTheRuleSet) {
   for (const bool order : {true, false}) {
     auto plan = Optimize(MustBind("SELECT n_name, r_name FROM nation, region"),
