@@ -23,6 +23,7 @@ class HashAggregateOperator final : public Operator {
     std::vector<LogicalType> key_types;
     for (const ExprPtr& group : node_.groups) key_types.push_back(group->type);
     std::vector<AggSpec> specs;
+    specs.reserve(node_.aggregates.size());
     for (const AggregateExpr& a : node_.aggregates) {
       AggSpec spec;
       spec.func = a.func;

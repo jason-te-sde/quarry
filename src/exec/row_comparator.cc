@@ -47,7 +47,7 @@ RowComparator::RowComparator(std::vector<Column> columns,
     : columns_(std::make_shared<std::vector<Column>>(std::move(columns))),
       owners_(std::move(owners)) {}
 
-arrow::Result<RowComparator> RowComparator::Make(std::vector<SortColumn> columns) {
+arrow::Result<RowComparator> RowComparator::Make(const std::vector<SortColumn>& columns) {
   std::vector<Column> out;
   std::vector<std::shared_ptr<arrow::Array>> owners;
   for (const SortColumn& c : columns) {

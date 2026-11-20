@@ -22,7 +22,7 @@ struct SortColumn {
 // Rows that are equal on every column compare equal.
 class RowComparator {
  public:
-  static arrow::Result<RowComparator> Make(std::vector<SortColumn> columns);
+  static arrow::Result<RowComparator> Make(const std::vector<SortColumn>& columns);
 
   // Negative when row a sorts before row b, positive when after, 0 when they tie.
   int Compare(uint32_t a, uint32_t b) const;

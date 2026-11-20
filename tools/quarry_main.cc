@@ -91,7 +91,7 @@ std::optional<int64_t> ParseSize(const std::string& text) {
   else if (unit == "KB")
     scale = 1000;
   else if (unit == "MB")
-    scale = 1000 * 1000;
+    scale = int64_t{1000} * 1000;
   else if (unit == "GB")
     scale = 1000LL * 1000 * 1000;
   else if (unit == "KIB")
@@ -121,9 +121,9 @@ std::optional<std::chrono::milliseconds> ParseDuration(const std::string& text) 
   else if (unit.empty() || unit == "s")
     scale = 1000;
   else if (unit == "m")
-    scale = 60 * 1000;
+    scale = int64_t{60} * 1000;
   else if (unit == "h")
-    scale = 60 * 60 * 1000;
+    scale = int64_t{60} * 60 * 1000;
   else
     return std::nullopt;
   if (value > INT64_MAX / scale) return std::nullopt;

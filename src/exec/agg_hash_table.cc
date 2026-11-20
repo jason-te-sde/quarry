@@ -556,6 +556,7 @@ arrow::Result<std::vector<std::shared_ptr<arrow::Array>>> AggHashTable::Finish(
   std::vector<ArrayPtr> out;
   if (!key_types_.empty()) {
     std::vector<std::shared_ptr<arrow::DataType>> types;
+    types.reserve(key_types_.size());
     for (const LogicalType& t : key_types_) types.push_back(t.ToArrow());
     std::vector<std::span<const uint8_t>> rows;
     rows.reserve(static_cast<size_t>(count));

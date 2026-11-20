@@ -100,8 +100,9 @@ struct Engine::Impl {
         status = next.status();
         break;
       }
-      if (!next->has_value()) break;
-      auto compact = (**next).Compact(context.pool);
+      const std::optional<Batch> batch = std::move(*next);
+      if (!batch.has_value()) break;
+      auto compact = batch->Compact(context.pool);
       if (!compact.ok()) {
         status = compact.status();
         break;

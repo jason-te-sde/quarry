@@ -120,6 +120,7 @@ class HashJoinOperator final : public Operator {
 
     if (node_.residual == nullptr) {
       std::vector<std::shared_ptr<arrow::Array>> columns;
+      columns.reserve(node_.output_columns.size());
       for (const JoinOutputColumn& out : node_.output_columns) {
         ARROW_ASSIGN_OR_RAISE(auto column,
                               out.from_build ? gather_build(out.index) : gather_probe(out.index));
@@ -147,6 +148,7 @@ class HashJoinOperator final : public Operator {
                           EvaluatePredicate(*node_.residual, candidates, context_->pool));
     if (kept.size() == 0) return std::optional<Batch>();
     std::vector<std::shared_ptr<arrow::Array>> columns;
+    columns.reserve(node_.output_columns.size());
     for (const JoinOutputColumn& out : node_.output_columns) {
       columns.push_back(out.from_build ? build_side[static_cast<size_t>(out.index)]
                                        : probe_side[static_cast<size_t>(out.index)]);

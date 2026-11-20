@@ -107,7 +107,7 @@ std::string Value(const arrow::Array& array, int64_t i, Style style) {
       return std::string(buffer, end);
     }
     case arrow::Type::DATE32: {
-      const std::string date = FormatDate(static_cast<const arrow::Date32Array&>(array).Value(i));
+      std::string date = FormatDate(static_cast<const arrow::Date32Array&>(array).Value(i));
       if (style == Style::kJson) {
         AppendJsonString(date, &out);
         return out;
@@ -117,7 +117,7 @@ std::string Value(const arrow::Array& array, int64_t i, Style style) {
     case arrow::Type::DECIMAL64: {
       int64_t value;
       std::memcpy(&value, static_cast<const arrow::Decimal64Array&>(array).GetValue(i), 8);
-      const std::string text =
+      std::string text =
           DecimalToString(value, static_cast<const arrow::Decimal64Type&>(*array.type()).scale());
       if (style == Style::kJson) return "\"" + text + "\"";
       return text;
@@ -125,7 +125,7 @@ std::string Value(const arrow::Array& array, int64_t i, Style style) {
     case arrow::Type::DECIMAL128: {
       Int128 value;
       std::memcpy(&value, static_cast<const arrow::Decimal128Array&>(array).GetValue(i), 16);
-      const std::string text =
+      std::string text =
           DecimalToString(value, static_cast<const arrow::Decimal128Type&>(*array.type()).scale());
       if (style == Style::kJson) return "\"" + text + "\"";
       return text;

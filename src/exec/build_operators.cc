@@ -47,9 +47,12 @@ class ProfiledOperator final : public Operator {
     const Clock::time_point start = Clock::now();
     arrow::Result<std::optional<Batch>> next = inner_->Next();
     inclusive_ns_ += NanosSince(start);
-    if (next.ok() && next->has_value()) {
-      ++stats_.batches_out;
-      stats_.rows_out += (**next).active_rows();
+    if (next.ok()) {
+      const std::optional<Batch>& batch = *next;
+      if (batch.has_value()) {
+        ++stats_.batches_out;
+        stats_.rows_out += batch->active_rows();
+      }
     }
     return next;
   }

@@ -57,11 +57,16 @@ std::vector<std::string> RunOp(std::unique_ptr<Operator> op, int32_t batch_size 
   TestContext context(batch_size);
   auto batches = Drain(*op, context.context);
   EXPECT_TRUE(batches.ok()) << batches.status().ToString();
-  if (!batches.ok()) return {};
+  if (!batches.ok()) {
+    op.reset();
+    return {};
+  }
   for (const Batch& b : *batches)
     EXPECT_GT(b.active_rows(), 0) << "an operator returned an empty batch";
   if (batches_out != nullptr) *batches_out = static_cast<int64_t>(batches->size());
-  return RowsOf(*batches);
+  const std::vector<std::string> rows = RowsOf(*batches);
+  op.reset();  // operators return what they hold to the budget, which `context` owns
+  return rows;
 }
 
 // ---- filter and project ----

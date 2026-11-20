@@ -16,7 +16,8 @@ namespace quarry {
 // A pull-based operator: the consumer calls Next until it returns std::nullopt, which is the end of
 // the stream. An operator never returns a batch with no live rows (a filter may drop a whole batch;
 // it then pulls the next one). A batch may carry a selection vector. Open is called once before
-// the first Next, Close once after the last (also after an error).
+// the first Next, Close once after the last (also after an error). The memory budget of the
+// ExecContext must outlive the operators: they hand back what they reserved when destroyed.
 class Operator {
  public:
   virtual ~Operator() = default;

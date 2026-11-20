@@ -88,11 +88,11 @@ std::vector<Case> AllCases() {
   return cases;
 }
 
-INSTANTIATE_TEST_SUITE_P(Answers, TpchTest, ::testing::ValuesIn(AllCases()),
-                         [](const ::testing::TestParamInfo<Case>& info) {
-                           return "q" + std::to_string(info.param.query) + "_" +
-                                  info.param.config.name;
-                         });
+std::string CaseName(const ::testing::TestParamInfo<Case>& param) {
+  return "q" + std::to_string(param.param.query) + "_" + param.param.config.name;
+}
+
+INSTANTIATE_TEST_SUITE_P(Answers, TpchTest, ::testing::ValuesIn(AllCases()), CaseName);
 
 }  // namespace
 }  // namespace quarry
