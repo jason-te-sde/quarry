@@ -7,12 +7,20 @@
 //                                         "<kind> error at <line>:<column>: " and, when `text` is
 //                                         given, a message that contains it
 //   ok                                    the statement must parse and bind
+//   query                                 the statement must run, and its result, as JSON (the
+//                                         format of tools/output_format.h), must equal the line
+//                                         after the `----` line that ends the SQL. Rows are
+//                                         compared in order when the SQL has an ORDER BY, as a
+//                                         multiset otherwise. The expected lines of
+//                                         results.test are generated from DuckDB by
+//                                         scripts/gen_goldens.py.
 //
 // <kind> is syntax or binder.
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -21,6 +29,8 @@
 
 #include "binder/binder.h"
 #include "binder/catalog.h"
+#include "output_format.h"
+#include "quarry/engine.h"
 
 namespace quarry {
 namespace {
@@ -73,11 +83,92 @@ const Catalog& TestCatalog() {
   return *catalog;
 }
 
+// The data every `query` block runs on.
+Engine& TestEngine() {
+  static Engine* engine = [] {
+    auto* e = new Engine(EngineOptions{});
+    for (const char* dir : {"tests/data/tpch-sf0.01", "tests/data/pruning", "tests/data/nulls"}) {
+      const arrow::Status st = e->RegisterDirectory(dir);
+      EXPECT_TRUE(st.ok()) << dir << ": " << st.ToString();
+    }
+    return e;
+  }();
+  return *engine;
+}
+
+bool HasOrderBy(const std::string& sql) {
+  std::string lower = sql;
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return lower.find("order by") != std::string::npos;
+}
+
+// {"columns":[...],"rows":[r,r,...]} -> the part before the rows, and each row's text. The rows
+// are found by tracking strings and brackets, so a string containing "],[" does not split one.
+bool SplitResult(const std::string& json, std::string* head, std::vector<std::string>* rows) {
+  const std::string marker = "\"rows\":[";
+  const size_t start = json.find(marker);
+  if (start == std::string::npos) return false;
+  *head = json.substr(0, start);
+  size_t i = start + marker.size();
+  int depth = 0;
+  bool in_string = false;
+  size_t row_start = 0;
+  for (; i < json.size(); ++i) {
+    const char c = json[i];
+    if (in_string) {
+      if (c == '\\') {
+        ++i;
+      } else if (c == '"') {
+        in_string = false;
+      }
+    } else if (c == '"') {
+      in_string = true;
+    } else if (c == '[') {
+      if (depth++ == 0) row_start = i;
+    } else if (c == ']') {
+      if (depth == 0) return true;  // the end of the rows array
+      if (--depth == 0) rows->push_back(json.substr(row_start, i - row_start + 1));
+    }
+  }
+  return false;
+}
+
+void RunQueryBlock(const Block& block) {
+  const size_t rule = block.sql.find("\n----\n");
+  ASSERT_NE(rule, std::string::npos) << "a query block needs a ---- line and an expected line";
+  const std::string sql = block.sql.substr(0, rule);
+  const std::string expected = block.sql.substr(rule + 6);
+  auto result = TestEngine().Execute(sql);
+  ASSERT_TRUE(result.ok()) << result.status().ToString();
+  const std::string actual = ToJson(*result->table);
+
+  std::string actual_head;
+  std::string expected_head;
+  std::vector<std::string> actual_rows;
+  std::vector<std::string> expected_rows;
+  ASSERT_TRUE(SplitResult(actual, &actual_head, &actual_rows)) << actual;
+  ASSERT_TRUE(SplitResult(expected, &expected_head, &expected_rows)) << expected;
+  EXPECT_EQ(actual_head, expected_head) << "column names or types differ";
+  if (!HasOrderBy(sql)) {
+    std::sort(actual_rows.begin(), actual_rows.end());
+    std::sort(expected_rows.begin(), expected_rows.end());
+  }
+  EXPECT_EQ(actual_rows.size(), expected_rows.size());
+  for (size_t i = 0; i < std::min(actual_rows.size(), expected_rows.size()); ++i) {
+    EXPECT_EQ(actual_rows[i], expected_rows[i]) << "row " << i;
+  }
+}
+
 void RunBlock(const std::filesystem::path& file, const Block& block) {
   SCOPED_TRACE(file.string() + ":" + std::to_string(block.header_line) + "\n" + block.sql);
   std::istringstream header(block.header);
   std::string word;
   header >> word;
+  if (word == "query") {
+    RunQueryBlock(block);
+    return;
+  }
   const auto result = ParseAndBind(block.sql, TestCatalog());
   if (word == "ok") {
     EXPECT_TRUE(result.ok()) << result.status().ToString();

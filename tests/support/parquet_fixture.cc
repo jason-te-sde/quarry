@@ -88,8 +88,9 @@ Column Decimal40Column(const std::string& name, const std::vector<int64_t>& hund
   return Make(name, std::move(out));
 }
 
-std::filesystem::path WriteParquet(const std::filesystem::path& file,
-                                   const std::vector<Column>& columns) {
+std::filesystem::path WriteParquetRowGroups(const std::filesystem::path& file,
+                                            const std::vector<Column>& columns,
+                                            int64_t row_group_size) {
   std::vector<std::shared_ptr<arrow::Field>> fields;
   std::vector<std::shared_ptr<arrow::Array>> arrays;
   for (const Column& c : columns) {
@@ -101,10 +102,32 @@ std::filesystem::path WriteParquet(const std::filesystem::path& file,
   EXPECT_TRUE(out.ok()) << out.status().ToString();
   if (out.ok()) {
     const arrow::Status st =
-        parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), *out, 1024);
+        parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), *out, row_group_size);
     EXPECT_TRUE(st.ok()) << st.ToString();
     EXPECT_TRUE((*out)->Close().ok());
   }
+  return file;
+}
+
+std::filesystem::path WriteParquet(const std::filesystem::path& file,
+                                   const std::vector<Column>& columns) {
+  return WriteParquetRowGroups(file, columns, 1024);
+}
+
+std::filesystem::path WriteParquetWithoutRowGroups(const std::filesystem::path& file,
+                                                   const std::vector<Column>& columns) {
+  std::vector<std::shared_ptr<arrow::Field>> fields;
+  for (const Column& c : columns) fields.push_back(c.first);
+  auto out = arrow::io::FileOutputStream::Open(file.string());
+  EXPECT_TRUE(out.ok()) << out.status().ToString();
+  if (!out.ok()) return file;
+  auto writer =
+      parquet::arrow::FileWriter::Open(*arrow::schema(fields), arrow::default_memory_pool(), *out);
+  EXPECT_TRUE(writer.ok()) << writer.status().ToString();
+  if (writer.ok()) {
+    EXPECT_TRUE((*writer)->Close().ok());
+  }
+  EXPECT_TRUE((*out)->Close().ok());
   return file;
 }
 

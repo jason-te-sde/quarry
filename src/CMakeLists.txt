@@ -32,6 +32,9 @@ quarry_add_library(quarry_planner
 quarry_add_library(quarry_io SOURCES io/parquet_scan.cc LIBS quarry_vector quarry::arrow)
 quarry_add_library(quarry_exec
   SOURCES exec/memory_budget.cc exec/hash.cc exec/key_encoding.cc exec/key_index.cc
-          exec/join_hash_table.cc exec/agg_hash_table.cc
+          exec/join_hash_table.cc exec/agg_hash_table.cc exec/scan_op.cc exec/operator_util.cc
+          exec/row_comparator.cc exec/filter_op.cc exec/project_op.cc exec/hash_join_op.cc
+          exec/hash_agg_op.cc exec/sort_op.cc exec/topn_op.cc exec/limit_op.cc
+          exec/build_operators.cc
   LIBS quarry_plan quarry_expr quarry_io)
-quarry_add_library(quarry_engine LIBS quarry_planner quarry_exec)
+quarry_add_library(quarry_engine SOURCES engine/engine.cc LIBS quarry_planner quarry_exec)

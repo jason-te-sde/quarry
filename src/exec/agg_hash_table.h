@@ -36,7 +36,7 @@ class AggHashTable {
  public:
   AggHashTable(std::vector<LogicalType> key_types, std::vector<AggSpec> aggregates,
                Reservation* reservation = nullptr, KeyHasher hasher = {});
-  ~AggHashTable();
+  ~AggHashTable();  // NOLINT(performance-trivially-destructible): AggregateState is incomplete here
   AggHashTable(const AggHashTable&) = delete;
   AggHashTable& operator=(const AggHashTable&) = delete;
 

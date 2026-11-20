@@ -127,6 +127,97 @@ jobs:
       - name: Test
         run: ctest --test-dir build/ci --output-on-failure --no-tests=error
 
+  # Line coverage of src/ and tools/ by the whole test suite, GCC instrumentation, read by gcovr. The
+  # job fails below 90% of the lines.
+  coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 gcc-14 pipx
+          pipx install gcovr==8.3
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
+          key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Configure
+        run: cmake --preset coverage
+
+      - name: Build
+        run: cmake --build build/coverage
+
+      - name: Test
+        run: ctest --test-dir build/coverage --output-on-failure --no-tests=error
+
+      - name: Coverage report
+        run: |
+          gcovr --root . --filter 'src/' --filter 'tools/' --gcov-executable gcov-14 \
+            --object-directory build/coverage --print-summary --fail-under-line 90 \
+            --txt build/coverage/coverage.txt --html-details build/coverage/coverage.html
+          tail -n 5 build/coverage/coverage.txt
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: build/coverage/coverage.*
+          if-no-files-found: ignore
+
+  # The whole test suite under AddressSanitizer and UndefinedBehaviorSanitizer (Clang). Any report
+  # fails the test that caused it, because the build uses -fno-sanitize-recover=all.
+  sanitize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CC: clang-18
+      CXX: clang++-18
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build clang-18 libclang-rt-18-dev
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-clang-18
+          key: arrow-${{ env.ARROW_VERSION }}-clang-18-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Configure
+        run: cmake --preset asan
+
+      - name: Build
+        run: cmake --build build/asan
+
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: ctest --test-dir build/asan --output-on-failure --no-tests=error
+
   # libFuzzer, 60 seconds per target, with AddressSanitizer and UBSan. A crash, a sanitizer report or
   # a stack overflow fails the job and uploads the input that caused it.
   fuzz:

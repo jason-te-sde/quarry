@@ -41,6 +41,15 @@ Column Decimal40Column(const std::string& name, const std::vector<int64_t>& hund
 std::filesystem::path WriteParquet(const std::filesystem::path& file,
                                    const std::vector<Column>& columns);
 
+// Writes a valid Parquet file that has the schema of `columns` and no row group at all.
+std::filesystem::path WriteParquetWithoutRowGroups(const std::filesystem::path& file,
+                                                   const std::vector<Column>& columns);
+
+// Like WriteParquet, with row groups of `row_group_size` rows.
+std::filesystem::path WriteParquetRowGroups(const std::filesystem::path& file,
+                                            const std::vector<Column>& columns,
+                                            int64_t row_group_size);
+
 }  // namespace quarry::testing
 
 #endif  // QUARRY_TESTS_SUPPORT_PARQUET_FIXTURE_H_

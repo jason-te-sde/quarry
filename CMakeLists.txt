@@ -27,7 +27,7 @@ endif()
 
 add_subdirectory(src)
 
-if(QUARRY_BUILD_TOOLS)
+if(QUARRY_BUILD_TOOLS OR QUARRY_BUILD_TESTS)
   add_subdirectory(tools)
 endif()
 

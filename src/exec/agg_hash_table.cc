@@ -165,7 +165,7 @@ class SumDoubleState final : public AggregateState {
 };
 
 // AVG of integers and DECIMALs: the exact sum and the count, divided once at the end as a DOUBLE.
-// A DECIMAL's scaled sum is divided by the count and then by 10^scale.
+// A DECIMAL's scaled sum is divided by 10^scale and then by the count.
 template <typename T>
 class AvgState final : public AggregateState {
  public:
@@ -198,7 +198,9 @@ class AvgState final : public AggregateState {
     for (size_t g = 0; g < sums_.size(); ++g) {
       if (counts_[g] == 0) continue;
       has[g] = 1;
-      averages[g] = static_cast<double>(sums_[g]) / static_cast<double>(counts_[g]) / divisor;
+      // The same order of operations as DuckDB, so that the last digit agrees: the sum as a
+      // number first, then the mean.
+      averages[g] = static_cast<double>(sums_[g]) / divisor / static_cast<double>(counts_[g]);
     }
     return MakeFixedArray<double>(arrow::float64(), averages, has, first, count, pool);
   }

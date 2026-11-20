@@ -49,8 +49,9 @@ quarry_add_test(Selection SOURCES unit/vector/selection_test.cc LIBS quarry_vect
 quarry_add_test(Eval SOURCES unit/expr/eval_test.cc LIBS quarry_expr quarry_test_support)
 quarry_add_test(EvalProperty SOURCES unit/expr/eval_property_test.cc LIBS quarry_expr quarry_test_support)
 
-# SQL error tests: tests/sql/*.test, run by one program against the TPC-H test data.
-quarry_add_test(SqlRunner SOURCES sql/sql_test_runner.cc LIBS quarry_binder)
+# SQL tests: tests/sql/*.test, run by one program against the TPC-H test data: error and ok blocks
+# check the front end, query blocks compare results with DuckDB's.
+quarry_add_test(SqlRunner SOURCES sql/sql_test_runner.cc LIBS quarry_binder quarry_engine quarry_output_format)
 
 # The optimizer: rules, join order, cardinality, physical plan, and the plan goldens.
 quarry_add_test(Rules SOURCES unit/planner/rules_test.cc LIBS quarry_planner quarry_test_fixtures)
@@ -79,3 +80,16 @@ endforeach()
 quarry_add_test(MemoryBudget SOURCES unit/exec/memory_budget_test.cc LIBS quarry_exec)
 quarry_add_test(JoinHashTable SOURCES unit/exec/join_hash_table_test.cc LIBS quarry_exec)
 quarry_add_test(AggHashTable SOURCES unit/exec/agg_hash_table_test.cc LIBS quarry_exec quarry_test_support)
+quarry_add_test(Scan SOURCES unit/exec/scan_test.cc LIBS quarry_exec quarry_planner quarry_test_fixtures)
+quarry_add_test(Operators SOURCES unit/exec/operators_test.cc LIBS quarry_exec quarry_planner quarry_test_fixtures)
+quarry_add_test(Tpch SOURCES tpch/tpch_test.cc LIBS quarry_engine quarry_output_format)
+quarry_add_test(Engine SOURCES unit/engine/engine_test.cc LIBS quarry_engine quarry_test_fixtures)
+quarry_add_test(OutputFormat SOURCES unit/tools/output_format_test.cc LIBS quarry_output_format quarry_test_support)
+
+# The command-line tool: output formats, options and exit statuses.
+if(TARGET quarry)
+  add_test(NAME cli_script
+    COMMAND ${QUARRY_BASH} "${PROJECT_SOURCE_DIR}/tests/scripts/cli_test.sh" $<TARGET_FILE:quarry>
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
+  set_tests_properties(cli_script PROPERTIES TIMEOUT 120)
+endif()

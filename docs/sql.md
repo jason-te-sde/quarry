@@ -101,8 +101,12 @@ exponent notation in numbers.
   column has an unsupported type (FLOAT, UINT64, TIMESTAMP, LIST, DECIMAL with p > 38) or is
   missing from a later file: that column is unusable, and naming it is a binder error that gives
   the column, the types and the file. The other columns stay usable.
-- Errors read `<kind> error at <line>:<column>: <message>`, kind `syntax` or `binder`, and the
-  position is the offending token.
+- An output column is named as the user typed it, like DuckDB does: `SELECT L_QUANTITY` yields a
+  column `L_QUANTITY`, `SELECT x AS MyName` one called `MyName`, and any other select item is named
+  by its text as written.
+- Errors read `<kind> error at <line>:<column>: <message>`, kind `syntax`, `binder` or `planner`, and
+  the position is the offending token; for the planner's "requires a cross product" it is where the
+  relation that cannot be reached is written in the FROM clause.
 
 ## DuckDB's type table
 
