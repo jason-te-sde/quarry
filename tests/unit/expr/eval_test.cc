@@ -314,6 +314,17 @@ TEST(EvalTest, DoubleArithmeticAndMixedTypes) {
                {Value(2.5), Value(3.25)});
 }
 
+TEST(EvalTest, DecimalToDoubleCastRoundsOnce) {
+  // The unscaled values are above 2^53: dividing their double by 10^scale would round twice.
+  Columns c{{Dec(17, 10), Dec(38, 6)},
+            {{D(10040364599609375, 10), kNull, D(-10040364599609375, 10)},
+             {D(PowerOfTen<Int128>(37) + 1000, 6), D(5, 6), kNull}}};
+  ExpectValues(Values(*Must(MakeCast(Col(0, Dec(17, 10)), kDbl)), MakeBatch(c)),
+               {Value(1004036.4599609375), kNull, Value(-1004036.4599609375)});
+  ExpectValues(Values(*Must(MakeCast(Col(1, Dec(38, 6)), kDbl)), MakeBatch(c)),
+               {Value(1e31), Value(5e-6), kNull});
+}
+
 TEST(EvalTest, NegateAndCast) {
   Columns c{{kInt, Dec(5, 2), kDbl},
             {{I(5), kNull}, {D(-150, 2), D(25, 2)}, {Value(0.0), Value(2.5)}}};

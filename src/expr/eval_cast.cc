@@ -3,18 +3,10 @@
 
 #include <arrow/status.h>
 
-#include <array>
-
 #include "expr/eval_internal.h"
 
 namespace quarry::eval_internal {
 namespace {
-
-// 10^0 .. 10^38 as the doubles nearest to them: DECIMAL -> DOUBLE is raw / 10^scale.
-constexpr std::array<double, 39> kPowersOfTenAsDouble = {
-    1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,  1e10, 1e11, 1e12,
-    1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22, 1e23, 1e24, 1e25,
-    1e26, 1e27, 1e28, 1e29, 1e30, 1e31, 1e32, 1e33, 1e34, 1e35, 1e36, 1e37, 1e38};
 
 // Applies f(in, &out) to every valid row; f returns false on overflow. Rows that are NULL are not
 // passed to f.
@@ -92,13 +84,13 @@ arrow::Result<ArrayPtr> RescaleDecimal(const arrow::Array& input, const LogicalT
 }
 
 template <typename In>
-arrow::Result<ArrayPtr> DecimalToDouble(const arrow::Array& input, const LogicalType& from,
-                                        arrow::MemoryPool* pool) {
-  const double divisor = kPowersOfTenAsDouble[from.scale];
+arrow::Result<ArrayPtr> DecimalToDoubleArray(const arrow::Array& input, const LogicalType& from,
+                                             arrow::MemoryPool* pool) {
+  const int scale = from.scale;
   return MapChecked<In, double>(
       input, LogicalType::Double(),
-      [divisor](In v, double* out) {
-        *out = static_cast<double>(v) / divisor;
+      [scale](In v, double* out) {
+        *out = DecimalToDouble(static_cast<Int128>(v), scale);
         return true;
       },
       pool);
@@ -124,8 +116,8 @@ arrow::Result<ArrayPtr> EvalCast(const arrow::Array& input, const LogicalType& f
     case TypeId::kDouble:
       if (from_int32) return Convert<int32_t, double>(input, to, pool);
       if (from_int64) return Convert<int64_t, double>(input, to, pool);
-      if (from.is_decimal64()) return DecimalToDouble<int64_t>(input, from, pool);
-      if (from.is_decimal()) return DecimalToDouble<Int128>(input, from, pool);
+      if (from.is_decimal64()) return DecimalToDoubleArray<int64_t>(input, from, pool);
+      if (from.is_decimal()) return DecimalToDoubleArray<Int128>(input, from, pool);
       break;
     case TypeId::kDecimal:
       if (from_int32 || from_int64) {

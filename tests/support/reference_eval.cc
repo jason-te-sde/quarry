@@ -4,6 +4,7 @@
 #include <arrow/util/decimal.h>
 
 #include <cmath>
+#include <cstdlib>
 #include <functional>
 #include <string>
 
@@ -21,12 +22,10 @@ Int128 Ten(int n) {
   return value;
 }
 
-double TenAsDouble(int n) {
-  double value = 1;
-  for (int i = 0; i < n; ++i) {
-    value *= 10;
-  }
-  return value;
+// The double nearest to raw / 10^scale, rounded once: strtod reads the exact decimal text.
+// (Dividing the double of raw by 10^scale rounds twice once raw has more than 53 bits.)
+double DecimalAsDouble(Int128 raw, int scale) {
+  return std::strtod(DecimalToString(raw, scale).c_str(), nullptr);
 }
 
 Int128 Abs(Int128 v) { return v < 0 ? -v : v; }
@@ -172,8 +171,7 @@ arrow::Result<Value> CastValue(const Value& v, const LogicalType& to) {
         return Value(static_cast<double>(std::get<int32_t>(v)));
       if (std::holds_alternative<int64_t>(v))
         return Value(static_cast<double>(std::get<int64_t>(v)));
-      return Value(static_cast<double>(std::get<DecimalValue>(v).raw) /
-                   TenAsDouble(std::get<DecimalValue>(v).scale));
+      return Value(DecimalAsDouble(std::get<DecimalValue>(v).raw, std::get<DecimalValue>(v).scale));
     case TypeId::kDecimal: {
       if (std::holds_alternative<DecimalValue>(v)) {
         const auto& d = std::get<DecimalValue>(v);

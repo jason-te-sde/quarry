@@ -124,5 +124,23 @@ TEST(DecimalTest, ToStringAndParse) {
   EXPECT_TRUE(ParseDecimalDigits(std::string(38, '9'), &scale).ok());
 }
 
+TEST(DecimalTest, ToDoubleIsCorrectlyRounded) {
+  // Small values: one exact division.
+  EXPECT_EQ(DecimalToDouble(12345, 2), 123.45);
+  EXPECT_EQ(DecimalToDouble(-5, 3), -0.005);
+  EXPECT_EQ(DecimalToDouble(0, 6), 0.0);
+  // 1004036.4599609375 is k/1024, so a double holds it exactly, but its unscaled value
+  // 10040364599609375 is above 2^53: converting that to a double first and dividing rounds twice
+  // and lands one ulp away. DuckDB rounds once, and so must we.
+  EXPECT_EQ(DecimalToDouble(10040364599609375, 10), 1004036.4599609375);
+  EXPECT_EQ(DecimalToDouble(-10040364599609375, 10), -1004036.4599609375);
+  EXPECT_EQ(DecimalToDouble(123456789123456789, 9), 123456789.123456789);
+  // Beyond 64 bits, and with a scale whose power of ten is not a double.
+  EXPECT_EQ(DecimalToDouble(PowerOfTen<Int128>(37), 0), 1e37);
+  EXPECT_EQ(DecimalToDouble(PowerOfTen<Int128>(37) + 1000, 6), 1e31);
+  EXPECT_EQ(DecimalToDouble(15, 30), 1.5e-29);
+  EXPECT_EQ(DecimalToDouble(kInt128Max, 37), 17.014118346046924);
+}
+
 }  // namespace
 }  // namespace quarry

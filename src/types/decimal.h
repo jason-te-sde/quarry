@@ -124,6 +124,12 @@ arrow::Result<T> DecimalRescale(T v, int from_scale, int to_scale, int to_precis
 // "-123.45" for (-12345, 2); "7" for (7, 0).
 std::string DecimalToString(Int128 value, int scale);
 
+// value / 10^scale as the double nearest to it, rounded once, as DuckDB does. `(double)value /
+// 10^scale` rounds twice when |value| > 2^53 (the numerator is rounded before the division), and
+// 10^scale is not a double beyond 10^22, so those cases go through the decimal text and strtod
+// instead.
+double DecimalToDouble(Int128 value, int scale);
+
 // Parses an optionally signed decimal literal such as "0.05", "-12" or "1." into the scaled
 // integer at its own scale (the digits after the point). Invalid on anything else, and when the
 // digits do not fit 38 digits.
