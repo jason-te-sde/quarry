@@ -37,6 +37,22 @@ inline constexpr bool kFlawJoinOrderDropsPredicate = true;
 inline constexpr bool kFlawJoinOrderDropsPredicate = false;
 #endif
 
+#ifdef QUARRY_FLAW_DROP_HASH_COLLISIONS
+// A hash table probe gives up at the first occupied slot that does not hold the key, so keys that
+// collide with an earlier one are lost.
+inline constexpr bool kFlawDropHashCollisions = true;
+#else
+inline constexpr bool kFlawDropHashCollisions = false;
+#endif
+
+#ifdef QUARRY_FLAW_PRUNE_WRONG_BOUND
+// Row-group pruning treats <= as < when it compares a literal with a row group's maximum, so a
+// group whose maximum equals the literal is skipped although it holds matching rows.
+inline constexpr bool kFlawPruneWrongBound = true;
+#else
+inline constexpr bool kFlawPruneWrongBound = false;
+#endif
+
 }  // namespace quarry
 
 #endif  // QUARRY_COMMON_FLAWS_H_

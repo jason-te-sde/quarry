@@ -30,5 +30,8 @@ quarry_add_library(quarry_planner
           planner/physical_planner.cc
   LIBS quarry_binder quarry_plan)
 quarry_add_library(quarry_io SOURCES io/parquet_scan.cc LIBS quarry_vector quarry::arrow)
-quarry_add_library(quarry_exec LIBS quarry_plan quarry_expr quarry_io)
+quarry_add_library(quarry_exec
+  SOURCES exec/memory_budget.cc exec/hash.cc exec/key_encoding.cc exec/key_index.cc
+          exec/join_hash_table.cc exec/agg_hash_table.cc
+  LIBS quarry_plan quarry_expr quarry_io)
 quarry_add_library(quarry_engine LIBS quarry_planner quarry_exec)

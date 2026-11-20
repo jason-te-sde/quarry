@@ -74,3 +74,8 @@ foreach(script hygiene layering objects)
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
   set_tests_properties(${script}_script PROPERTIES TIMEOUT 120)
 endforeach()
+
+# Operators and their hash tables.
+quarry_add_test(MemoryBudget SOURCES unit/exec/memory_budget_test.cc LIBS quarry_exec)
+quarry_add_test(JoinHashTable SOURCES unit/exec/join_hash_table_test.cc LIBS quarry_exec)
+quarry_add_test(AggHashTable SOURCES unit/exec/agg_hash_table_test.cc LIBS quarry_exec quarry_test_support)
