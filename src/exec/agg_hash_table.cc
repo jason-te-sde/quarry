@@ -33,9 +33,22 @@ class AggregateState {
   virtual arrow::Result<ArrayPtr> Finish(int64_t first, int64_t count,
                                          arrow::MemoryPool* pool) const = 0;
   virtual int64_t memory_bytes() const = 0;
+  // The partial state of groups [first, first + count) as columns of PartialTypes(), and the
+  // inverse: folds the partial states of `n` groups (one row of `partial` each) into group
+  // group_ids[i]. Spilling writes the first and the merge phase reads it back through the second.
+  virtual std::vector<std::shared_ptr<arrow::DataType>> PartialTypes() const = 0;
+  virtual arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
+                                                             arrow::MemoryPool* pool) const = 0;
+  virtual arrow::Status Merge(const uint32_t* group_ids,
+                              const std::vector<const arrow::Array*>& partial, int64_t n) = 0;
 };
 
 namespace {
+
+const std::shared_ptr<arrow::DataType>& Int128Partial() {
+  static const std::shared_ptr<arrow::DataType> type = arrow::decimal128(38, 0);
+  return type;
+}
 
 // An array of fixed-width values, with a validity bitmap built from `valid` (1 = a value).
 template <typename T>
@@ -87,6 +100,22 @@ class CountState final : public AggregateState {
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(counts_.capacity() * sizeof(int64_t));
   }
+  std::vector<std::shared_ptr<arrow::DataType>> PartialTypes() const override {
+    return {arrow::int64()};
+  }
+  arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
+                                                     arrow::MemoryPool* pool) const override {
+    ARROW_ASSIGN_OR_RAISE(auto counts, Finish(first, count, pool));
+    return std::vector<ArrayPtr>{std::move(counts)};
+  }
+  arrow::Status Merge(const uint32_t* group_ids, const std::vector<const arrow::Array*>& partial,
+                      int64_t n) override {
+    const uint8_t* values = ValueBytes(*partial[0]);
+    for (int64_t i = 0; i < n; ++i) {
+      counts_[group_ids[i]] += Load<int64_t>(values, partial[0]->offset(), i);
+    }
+    return arrow::Status::OK();
+  }
 
  private:
   bool star_;
@@ -128,6 +157,33 @@ class SumState final : public AggregateState {
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(sums_.capacity() * sizeof(Int128) + has_.capacity());
   }
+  std::vector<std::shared_ptr<arrow::DataType>> PartialTypes() const override {
+    return {result_.ToArrow()};
+  }
+  arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
+                                                     arrow::MemoryPool* pool) const override {
+    ARROW_ASSIGN_OR_RAISE(auto sums, Finish(first, count, pool));
+    return std::vector<ArrayPtr>{std::move(sums)};
+  }
+  arrow::Status Merge(const uint32_t* group_ids, const std::vector<const arrow::Array*>& partial,
+                      int64_t n) override {
+    const arrow::Array& arg = *partial[0];
+    const uint8_t* values = ValueBytes(arg);
+    const uint8_t* valid = ValidBits(arg);
+    for (int64_t i = 0; i < n; ++i) {
+      if (!IsValid(valid, arg, i)) continue;
+      Int128& sum = sums_[group_ids[i]];
+      Int128 next;
+      if (__builtin_add_overflow(sum, Load<Int128>(values, arg.offset(), i), &next) ||
+          !FitsPrecision<Int128>(next, kMaxDecimalPrecision)) {
+        return arrow::Status::Invalid("decimal overflow in SUM: the sum does not fit DECIMAL(",
+                                      kMaxDecimalPrecision, ")");
+      }
+      sum = next;
+      has_[group_ids[i]] = 1;
+    }
+    return arrow::Status::OK();
+  }
 
  private:
   LogicalType result_;
@@ -157,6 +213,18 @@ class SumDoubleState final : public AggregateState {
   }
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(sums_.capacity() * sizeof(double) + has_.capacity());
+  }
+  std::vector<std::shared_ptr<arrow::DataType>> PartialTypes() const override {
+    return {arrow::float64()};
+  }
+  arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
+                                                     arrow::MemoryPool* pool) const override {
+    ARROW_ASSIGN_OR_RAISE(auto sums, Finish(first, count, pool));
+    return std::vector<ArrayPtr>{std::move(sums)};
+  }
+  arrow::Status Merge(const uint32_t* group_ids, const std::vector<const arrow::Array*>& partial,
+                      int64_t n) override {
+    return Update(group_ids, partial[0], n);  // a partial sum is folded in like a value
   }
 
  private:
@@ -208,6 +276,34 @@ class AvgState final : public AggregateState {
     return static_cast<int64_t>(sums_.capacity() * sizeof(Int128) +
                                 counts_.capacity() * sizeof(int64_t));
   }
+  // The exact sum and the count, so that merging spilled partials divides once, at the end.
+  std::vector<std::shared_ptr<arrow::DataType>> PartialTypes() const override {
+    return {Int128Partial(), arrow::int64()};
+  }
+  arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
+                                                     arrow::MemoryPool* pool) const override {
+    const std::vector<uint8_t> all(sums_.size(), 1);
+    ARROW_ASSIGN_OR_RAISE(auto sums,
+                          MakeFixedArray<Int128>(Int128Partial(), sums_, all, first, count, pool));
+    ARROW_ASSIGN_OR_RAISE(
+        auto counts, MakeFixedArray<int64_t>(arrow::int64(), counts_, all, first, count, pool));
+    return std::vector<ArrayPtr>{std::move(sums), std::move(counts)};
+  }
+  arrow::Status Merge(const uint32_t* group_ids, const std::vector<const arrow::Array*>& partial,
+                      int64_t n) override {
+    const uint8_t* sums = ValueBytes(*partial[0]);
+    const uint8_t* counts = ValueBytes(*partial[1]);
+    for (int64_t i = 0; i < n; ++i) {
+      Int128 next;
+      if (__builtin_add_overflow(sums_[group_ids[i]], Load<Int128>(sums, partial[0]->offset(), i),
+                                 &next)) {
+        return arrow::Status::Invalid("overflow in AVG: the sum does not fit 128 bits");
+      }
+      sums_[group_ids[i]] = next;
+      counts_[group_ids[i]] += Load<int64_t>(counts, partial[1]->offset(), i);
+    }
+    return arrow::Status::OK();
+  }
 
  private:
   int scale_;
@@ -246,6 +342,28 @@ class AvgDoubleState final : public AggregateState {
     return static_cast<int64_t>(sums_.capacity() * sizeof(double) +
                                 counts_.capacity() * sizeof(int64_t));
   }
+  std::vector<std::shared_ptr<arrow::DataType>> PartialTypes() const override {
+    return {arrow::float64(), arrow::int64()};
+  }
+  arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
+                                                     arrow::MemoryPool* pool) const override {
+    const std::vector<uint8_t> all(sums_.size(), 1);
+    ARROW_ASSIGN_OR_RAISE(
+        auto sums, MakeFixedArray<double>(arrow::float64(), sums_, all, first, count, pool));
+    ARROW_ASSIGN_OR_RAISE(
+        auto counts, MakeFixedArray<int64_t>(arrow::int64(), counts_, all, first, count, pool));
+    return std::vector<ArrayPtr>{std::move(sums), std::move(counts)};
+  }
+  arrow::Status Merge(const uint32_t* group_ids, const std::vector<const arrow::Array*>& partial,
+                      int64_t n) override {
+    const uint8_t* sums = ValueBytes(*partial[0]);
+    const uint8_t* counts = ValueBytes(*partial[1]);
+    for (int64_t i = 0; i < n; ++i) {
+      sums_[group_ids[i]] += Load<double>(sums, partial[0]->offset(), i);
+      counts_[group_ids[i]] += Load<int64_t>(counts, partial[1]->offset(), i);
+    }
+    return arrow::Status::OK();
+  }
 
  private:
   std::vector<double> sums_;
@@ -281,6 +399,18 @@ class MinMaxState final : public AggregateState {
   }
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(values_.capacity() * sizeof(T) + has_.capacity());
+  }
+  std::vector<std::shared_ptr<arrow::DataType>> PartialTypes() const override {
+    return {type_};
+  }
+  arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
+                                                     arrow::MemoryPool* pool) const override {
+    ARROW_ASSIGN_OR_RAISE(auto values, Finish(first, count, pool));
+    return std::vector<ArrayPtr>{std::move(values)};
+  }
+  arrow::Status Merge(const uint32_t* group_ids, const std::vector<const arrow::Array*>& partial,
+                      int64_t n) override {
+    return Update(group_ids, partial[0], n);  // the minimum of minima, the maximum of maxima
   }
 
  private:
@@ -324,6 +454,18 @@ class MinMaxBoolState final : public AggregateState {
   }
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(values_.capacity() + has_.capacity());
+  }
+  std::vector<std::shared_ptr<arrow::DataType>> PartialTypes() const override {
+    return {arrow::boolean()};
+  }
+  arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
+                                                     arrow::MemoryPool* pool) const override {
+    ARROW_ASSIGN_OR_RAISE(auto values, Finish(first, count, pool));
+    return std::vector<ArrayPtr>{std::move(values)};
+  }
+  arrow::Status Merge(const uint32_t* group_ids, const std::vector<const arrow::Array*>& partial,
+                      int64_t n) override {
+    return Update(group_ids, partial[0], n);  // the minimum of minima, the maximum of maxima
   }
 
  private:
@@ -371,6 +513,18 @@ class MinMaxStringState final : public AggregateState {
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(values_.capacity() * sizeof(std::string) + has_.capacity()) +
            bytes_;
+  }
+  std::vector<std::shared_ptr<arrow::DataType>> PartialTypes() const override {
+    return {arrow::utf8()};
+  }
+  arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
+                                                     arrow::MemoryPool* pool) const override {
+    ARROW_ASSIGN_OR_RAISE(auto values, Finish(first, count, pool));
+    return std::vector<ArrayPtr>{std::move(values)};
+  }
+  arrow::Status Merge(const uint32_t* group_ids, const std::vector<const arrow::Array*>& partial,
+                      int64_t n) override {
+    return Update(group_ids, partial[0], n);  // the minimum of minima, the maximum of maxima
   }
 
  private:
@@ -465,7 +619,13 @@ AggHashTable::AggHashTable(std::vector<LogicalType> key_types, std::vector<AggSp
     : key_types_(std::move(key_types)),
       specs_(std::move(aggregates)),
       reservation_(reservation),
+      hasher_(hasher),
       index_(std::move(hasher)) {
+  MakeStates();
+}
+
+void AggHashTable::MakeStates() {
+  states_.clear();
   for (const AggSpec& spec : specs_) {
     auto state = MakeState(spec);
     // A spec the binder accepted always has a state; a failure here is a programming error that
@@ -473,6 +633,17 @@ AggHashTable::AggHashTable(std::vector<LogicalType> key_types, std::vector<AggSp
     if (state.ok()) states_.push_back(std::move(*state));
   }
 }
+
+void AggHashTable::Clear() {
+  index_ = KeyIndex(hasher_);
+  MakeStates();
+  groups_ = 0;
+  over_budget_ = false;
+  if (reservation_ != nullptr && charged_ > 0) reservation_->Shrink(charged_);
+  charged_ = 0;
+}
+
+uint64_t AggHashTable::KeyHash(int64_t group) const { return index_.Hash(index_.key(group)); }
 
 AggHashTable::~AggHashTable() = default;
 
@@ -488,24 +659,29 @@ arrow::Status AggHashTable::Charge() {
   if (reservation_ == nullptr) return arrow::Status::OK();
   const int64_t now = memory_bytes();
   if (now > charged_) {
-    ARROW_RETURN_NOT_OK(reservation_->Grow(now - charged_));
+    if (spillable_) {
+      if (!reservation_->TryGrow(now - charged_)) {
+        over_budget_ = true;  // the caller spills the table and clears it
+        return arrow::Status::OK();
+      }
+    } else {
+      ARROW_RETURN_NOT_OK(reservation_->Grow(now - charged_));
+    }
     charged_ = now;
   }
   return arrow::Status::OK();
 }
 
-arrow::Status AggHashTable::Update(const std::vector<std::shared_ptr<arrow::Array>>& keys,
-                                   const std::vector<std::shared_ptr<arrow::Array>>& args,
-                                   int64_t n) {
+arrow::Status AggHashTable::FindGroups(const std::vector<std::shared_ptr<arrow::Array>>& keys,
+                                       int64_t n, std::vector<uint32_t>* group_ids) {
   if (states_.size() != specs_.size()) {
     return arrow::Status::Invalid("an aggregate of the plan has no implementation");
   }
-  if (keys.size() != key_types_.size() || args.size() != specs_.size()) {
-    return arrow::Status::Invalid("aggregate update has ", keys.size(), " keys and ", args.size(),
-                                  " arguments, expected ", key_types_.size(), " and ",
-                                  specs_.size());
+  if (keys.size() != key_types_.size()) {
+    return arrow::Status::Invalid("aggregate update has ", keys.size(), " keys, expected ",
+                                  key_types_.size());
   }
-  std::vector<uint32_t> group_ids(static_cast<size_t>(n));
+  group_ids->assign(static_cast<size_t>(n), 0);
   if (key_types_.empty()) {
     if (n > 0) {
       ARROW_RETURN_NOT_OK(EnsureGlobalGroup());
@@ -521,17 +697,60 @@ arrow::Status AggHashTable::Update(const std::vector<std::shared_ptr<arrow::Arra
         id = index_.Insert(key, hash);
         ++groups_;
       }
-      group_ids[static_cast<size_t>(i)] = static_cast<uint32_t>(id);
+      (*group_ids)[static_cast<size_t>(i)] = static_cast<uint32_t>(id);
     }
   }
   if (groups_ > static_cast<int64_t>(UINT32_MAX)) {
     return arrow::Status::Invalid("more than 2^32 groups");
   }
-  for (size_t a = 0; a < states_.size(); ++a) {
-    states_[a]->Resize(groups_);
-    if (n > 0) {
+  for (const auto& state : states_) state->Resize(groups_);
+  return arrow::Status::OK();
+}
+
+arrow::Status AggHashTable::Update(const std::vector<std::shared_ptr<arrow::Array>>& keys,
+                                   const std::vector<std::shared_ptr<arrow::Array>>& args,
+                                   int64_t n) {
+  if (args.size() != specs_.size()) {
+    return arrow::Status::Invalid("aggregate update has ", args.size(), " arguments, expected ",
+                                  specs_.size());
+  }
+  std::vector<uint32_t> group_ids;
+  ARROW_RETURN_NOT_OK(FindGroups(keys, n, &group_ids));
+  if (n > 0) {
+    for (size_t a = 0; a < states_.size(); ++a) {
       ARROW_RETURN_NOT_OK(states_[a]->Update(group_ids.data(), args[a].get(), n));
     }
+  }
+  return Charge();
+}
+
+std::vector<std::shared_ptr<arrow::DataType>> AggHashTable::PartialTypes() const {
+  std::vector<std::shared_ptr<arrow::DataType>> types;
+  for (const LogicalType& t : key_types_) types.push_back(t.ToArrow());
+  for (const auto& state : states_) {
+    for (auto& type : state->PartialTypes()) types.push_back(std::move(type));
+  }
+  return types;
+}
+
+arrow::Status AggHashTable::MergePartial(
+    const std::vector<std::shared_ptr<arrow::Array>>& keys,
+    const std::vector<std::shared_ptr<arrow::Array>>& partials, int64_t n) {
+  std::vector<uint32_t> group_ids;
+  ARROW_RETURN_NOT_OK(FindGroups(keys, n, &group_ids));
+  size_t next = 0;
+  for (const auto& state : states_) {
+    const size_t width = state->PartialTypes().size();
+    if (next + width > partials.size()) {
+      return arrow::Status::Invalid("a spilled aggregate row has too few partial columns");
+    }
+    std::vector<const arrow::Array*> columns;
+    for (size_t i = 0; i < width; ++i) columns.push_back(partials[next + i].get());
+    next += width;
+    if (n > 0) ARROW_RETURN_NOT_OK(state->Merge(group_ids.data(), columns, n));
+  }
+  if (next != partials.size()) {
+    return arrow::Status::Invalid("a spilled aggregate row has too many partial columns");
   }
   return Charge();
 }
@@ -566,6 +785,29 @@ arrow::Result<std::vector<std::shared_ptr<arrow::Array>>> AggHashTable::Finish(
   for (const auto& state : states_) {
     ARROW_ASSIGN_OR_RAISE(auto column, state->Finish(first, count, pool));
     out.push_back(std::move(column));
+  }
+  return out;
+}
+
+arrow::Result<std::vector<std::shared_ptr<arrow::Array>>> AggHashTable::FinishPartial(
+    int64_t first, int64_t count, arrow::MemoryPool* pool) const {
+  if (first < 0 || count < 0 || first + count > groups_) {
+    return arrow::Status::Invalid("groups [", first, ", ", first + count,
+                                  ") are out of range: ", groups_, " groups");
+  }
+  std::vector<ArrayPtr> out;
+  if (!key_types_.empty()) {
+    std::vector<std::shared_ptr<arrow::DataType>> types;
+    types.reserve(key_types_.size());
+    for (const LogicalType& t : key_types_) types.push_back(t.ToArrow());
+    std::vector<std::span<const uint8_t>> rows;
+    rows.reserve(static_cast<size_t>(count));
+    for (int64_t g = first; g < first + count; ++g) rows.push_back(index_.key(g));
+    ARROW_ASSIGN_OR_RAISE(out, DecodeKeys(types, rows, pool));
+  }
+  for (const auto& state : states_) {
+    ARROW_ASSIGN_OR_RAISE(auto columns, state->FinishPartial(first, count, pool));
+    for (auto& column : columns) out.push_back(std::move(column));
   }
   return out;
 }

@@ -53,6 +53,14 @@ inline constexpr bool kFlawPruneWrongBound = true;
 inline constexpr bool kFlawPruneWrongBound = false;
 #endif
 
+#ifdef QUARRY_FLAW_SPILL_DROPS_LAST_BATCH
+// A spill writer does not flush its final buffered rows before it finishes the file, so the tail of
+// every spilled partition is lost.
+inline constexpr bool kFlawSpillDropsLastBatch = true;
+#else
+inline constexpr bool kFlawSpillDropsLastBatch = false;
+#endif
+
 }  // namespace quarry
 
 #endif  // QUARRY_COMMON_FLAWS_H_

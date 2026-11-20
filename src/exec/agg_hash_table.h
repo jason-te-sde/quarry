@@ -58,16 +58,40 @@ class AggHashTable {
 
   int64_t memory_bytes() const;
 
+  // Spilling. A spillable table does not fail when the reservation cannot grow: it keeps the rows
+  // it was given, charges nothing for them and reports over_budget(); the caller then writes the
+  // table out with FinishPartial and empties it with Clear (which also returns the charge).
+  void set_spillable(bool spillable) { spillable_ = spillable; }
+  bool over_budget() const { return over_budget_; }
+  void Clear();
+  // The Arrow types of FinishPartial's columns: the key columns, then each aggregate's partial
+  // state (COUNT: the count; SUM: the sum; AVG: the sum and the count; MIN/MAX: the value).
+  std::vector<std::shared_ptr<arrow::DataType>> PartialTypes() const;
+  arrow::Result<std::vector<std::shared_ptr<arrow::Array>>> FinishPartial(
+      int64_t first, int64_t count, arrow::MemoryPool* pool) const;
+  // Folds in `n` groups' partial states, as FinishPartial wrote them: the key columns and the
+  // partial columns (without the keys).
+  arrow::Status MergePartial(const std::vector<std::shared_ptr<arrow::Array>>& keys,
+                             const std::vector<std::shared_ptr<arrow::Array>>& partials, int64_t n);
+  // The hash a spill partitions group `group` by: of the same key bytes a probe compares.
+  uint64_t KeyHash(int64_t group) const;
+
  private:
   arrow::Status Charge();
+  void MakeStates();
+  arrow::Status FindGroups(const std::vector<std::shared_ptr<arrow::Array>>& keys, int64_t n,
+                           std::vector<uint32_t>* group_ids);
 
   std::vector<LogicalType> key_types_;
   std::vector<AggSpec> specs_;
   Reservation* reservation_;
+  KeyHasher hasher_;
   KeyIndex index_;
   std::vector<std::unique_ptr<AggregateState>> states_;
   int64_t groups_ = 0;
   int64_t charged_ = 0;
+  bool spillable_ = false;
+  bool over_budget_ = false;
 };
 
 }  // namespace quarry

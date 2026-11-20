@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <set>
 #include <string>
@@ -22,6 +23,9 @@ struct EngineOptions {
   std::set<std::string> disabled_rules;  // fold_constants, push_filters, prune_row_groups, ...
   std::filesystem::path spill_parent;    // empty = std::filesystem::temp_directory_path()
   std::chrono::milliseconds timeout{0};  // 0 = none
+  // For tests: called with "spill.write", "spill.finish" or "spill.read" before each spill I/O
+  // operation; an error status fails that operation with it.
+  std::function<arrow::Status(std::string_view site)> spill_fault;
 };
 
 // What one operator of a query did.

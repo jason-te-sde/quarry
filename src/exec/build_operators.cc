@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 
+#include "exec/operator_util.h"
 #include "exec/operators.h"
 #include "exec/scan_op.h"
 
@@ -37,13 +38,7 @@ class ProfiledOperator final : public Operator {
   }
 
   arrow::Result<std::optional<Batch>> Next() override {
-    if (context_->cancelled != nullptr && context_->cancelled->load(std::memory_order_relaxed)) {
-      return arrow::Status::Cancelled("query cancelled");
-    }
-    if (context_->deadline != Clock::time_point::max() && Clock::now() >= context_->deadline) {
-      return arrow::Status::Cancelled("query cancelled: the timeout of ", context_->timeout.count(),
-                                      " ms was exceeded");
-    }
+    ARROW_RETURN_NOT_OK(CheckInterrupted(*context_));
     const Clock::time_point start = Clock::now();
     arrow::Result<std::optional<Batch>> next = inner_->Next();
     inclusive_ns_ += NanosSince(start);

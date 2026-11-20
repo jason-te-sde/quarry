@@ -78,10 +78,13 @@ endforeach()
 
 # Operators and their hash tables.
 quarry_add_test(MemoryBudget SOURCES unit/exec/memory_budget_test.cc LIBS quarry_exec)
+quarry_add_test(Spill SOURCES unit/exec/spill_test.cc LIBS quarry_engine quarry_io quarry_test_fixtures)
 quarry_add_test(JoinHashTable SOURCES unit/exec/join_hash_table_test.cc LIBS quarry_exec)
 quarry_add_test(AggHashTable SOURCES unit/exec/agg_hash_table_test.cc LIBS quarry_exec quarry_test_support)
 quarry_add_test(Scan SOURCES unit/exec/scan_test.cc LIBS quarry_exec quarry_planner quarry_test_fixtures)
 quarry_add_test(Operators SOURCES unit/exec/operators_test.cc LIBS quarry_exec quarry_planner quarry_test_fixtures)
+quarry_add_test(HighCardinalityAgg SOURCES unit/exec/high_cardinality_agg_test.cc LIBS quarry_engine quarry_test_fixtures)
+quarry_add_test(TpchBudget SOURCES tpch/tpch_budget_test.cc LIBS quarry_engine quarry_output_format quarry_test_fixtures)
 quarry_add_test(Tpch SOURCES tpch/tpch_test.cc LIBS quarry_engine quarry_output_format)
 quarry_add_test(Engine SOURCES unit/engine/engine_test.cc LIBS quarry_engine quarry_test_fixtures)
 quarry_add_test(OutputFormat SOURCES unit/tools/output_format_test.cc LIBS quarry_output_format quarry_test_support)

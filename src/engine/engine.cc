@@ -11,6 +11,7 @@
 #include "binder/catalog.h"
 #include "exec/build_operators.h"
 #include "exec/memory_budget.h"
+#include "io/spill_directory.h"
 #include "plan/explain.h"
 #include "planner/physical_planner.h"
 #include "planner/rules.h"
@@ -81,8 +82,25 @@ struct Engine::Impl {
 
     cancelled.store(false);
     MemoryBudget budget(options.memory_limit_bytes);
+    // One spill directory per query, made only when a limit makes spilling possible. It is
+    // declared before the operators so that it outlives them, and removed with everything in it
+    // when this function returns, whatever the outcome.
+    std::unique_ptr<SpillDirectory> spill_directory;
+    if (options.memory_limit_bytes > 0) {
+      std::error_code error;
+      const std::filesystem::path parent = options.spill_parent.empty()
+                                               ? std::filesystem::temp_directory_path(error)
+                                               : options.spill_parent;
+      if (error) {
+        return arrow::Status::IOError("cannot find a directory for spill files: ",
+                                      error.message());
+      }
+      ARROW_ASSIGN_OR_RAISE(spill_directory, SpillDirectory::Create(parent));
+    }
     ExecContext context;
     context.budget = &budget;
+    context.spill = spill_directory.get();
+    context.fault = options.spill_fault;
     context.batch_size = options.batch_size;
     context.cancelled = &cancelled;
     if (options.timeout.count() > 0) {

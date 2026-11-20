@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+
 namespace quarry {
 namespace {
 
@@ -57,6 +59,31 @@ TEST(MemoryBudgetTest, ShrinkNeverGoesBelowZeroAndPeakIsPerReservation) {
   EXPECT_EQ(a.size(), 0);
   EXPECT_EQ(budget.used(), 0);
   EXPECT_EQ(a.peak(), 50);
+}
+
+TEST(MemoryBudgetTest, AReservationMayOutliveItsBudget) {
+  // An operator destroyed after the budget it reserved from must not touch freed memory: the
+  // reservation shares ownership of the budget's state. (AddressSanitizer flags the dangling
+  // access when it does not.)
+  auto budget = std::make_unique<MemoryBudget>(100);
+  Reservation a(*budget, "a");
+  ASSERT_TRUE(a.Grow(60).ok());
+  budget.reset();
+  EXPECT_FALSE(a.TryGrow(60));  // the limit still applies
+  EXPECT_TRUE(a.TryGrow(40));
+  a.Shrink(100);
+  EXPECT_EQ(a.size(), 0);
+}
+
+TEST(MemoryBudgetTest, ReservationsOfDifferentBudgetsAreIndependent) {
+  MemoryBudget small(10);
+  MemoryBudget large(1000);
+  Reservation a(small, "a");
+  Reservation b(large, "b");
+  EXPECT_FALSE(a.TryGrow(11));
+  EXPECT_TRUE(b.TryGrow(500));
+  EXPECT_EQ(small.used(), 0);
+  EXPECT_EQ(large.used(), 500);
 }
 
 }  // namespace

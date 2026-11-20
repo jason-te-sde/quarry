@@ -100,8 +100,10 @@ class TopNOperator final : public Operator {
       entry.columns = std::move(batch.columns);
       pending_rows += entry.rows;
       pending.push_back(std::move(entry));
-      ARROW_RETURN_NOT_OK(charged_->Set(BestBytes() + pending_bytes));
-      if (pending_rows >= reduce_at) {
+      // The buffer is reduced to the best n rows when it is large, or earlier when the budget has
+      // no room for it: a Top-N holds n rows and a batch, never the whole input.
+      const bool fits = charged_->TrySet(BestBytes() + pending_bytes);
+      if (!fits || pending_rows >= reduce_at) {
         ARROW_RETURN_NOT_OK(Reduce(&pending));
         pending_rows = 0;
         pending_bytes = 0;

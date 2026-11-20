@@ -226,5 +226,141 @@ TEST(AggHashTableTest, MemoryIsChargedToTheReservationAndRefusedOverTheLimit) {
       << status.message();
 }
 
+// Partial states: what a spilling aggregate writes out and merges back must give the answer a single
+// table gives over all the rows.
+struct PartialInput {
+  std::vector<LogicalType> types;  // the argument type of each aggregate
+  std::vector<AggFunc> funcs;
+  std::vector<std::shared_ptr<arrow::Array>> keys;
+  std::vector<std::shared_ptr<arrow::Array>> args;
+};
+
+PartialInput MakePartialInput(int64_t first, int64_t count) {
+  std::vector<int64_t> key, big;
+  std::vector<int32_t> small, days;
+  std::vector<int64_t> d64;
+  std::vector<Int128> d128;
+  std::vector<double> dbl;
+  std::vector<std::string> str;
+  std::vector<bool> flag;
+  testing::NullSet nulls;
+  for (int64_t i = first; i < first + count; ++i) {
+    const auto at = static_cast<size_t>(i - first);
+    key.push_back(i % 7);
+    big.push_back(i * 1000003 - 4000000);
+    small.push_back(static_cast<int32_t>(i * 7 - 50));
+    days.push_back(static_cast<int32_t>(10000 + i * 13 % 400));
+    d64.push_back(i * 12345 - 99999);
+    d128.push_back((Int128{1} << 70) * (i - 20) + i);
+    dbl.push_back(static_cast<double>(i) * 0.25 - 3.0);
+    str.push_back("s" + std::to_string((i * 37) % 101));
+    flag.push_back(i % 3 == 0);
+    if (i % 5 == 0) nulls.insert(at);
+  }
+  PartialInput in;
+  in.keys = {Int64Array(key)};
+  const auto add = [&](AggFunc func, const LogicalType& type, std::shared_ptr<arrow::Array> arg) {
+    in.funcs.push_back(func);
+    in.types.push_back(type);
+    in.args.push_back(std::move(arg));
+  };
+  add(AggFunc::kCountStar, LogicalType::Int64(), nullptr);
+  add(AggFunc::kCount, LogicalType::Int64(), Int64Array(big, nulls));
+  add(AggFunc::kSum, LogicalType::Int32(), Int32Array(small, nulls));
+  add(AggFunc::kSum, LogicalType::Int64(), Int64Array(big, nulls));
+  add(AggFunc::kSum, LogicalType::Decimal(10, 2), Decimal64Array(d64, 10, 2, nulls));
+  add(AggFunc::kSum, LogicalType::Decimal(30, 2), Decimal128Array(d128, 30, 2, nulls));
+  add(AggFunc::kSum, LogicalType::Double(), DoubleArray(dbl, nulls));
+  add(AggFunc::kAvg, LogicalType::Int32(), Int32Array(small, nulls));
+  add(AggFunc::kAvg, LogicalType::Int64(), Int64Array(big, nulls));
+  add(AggFunc::kAvg, LogicalType::Decimal(10, 2), Decimal64Array(d64, 10, 2, nulls));
+  add(AggFunc::kAvg, LogicalType::Decimal(30, 2), Decimal128Array(d128, 30, 2, nulls));
+  add(AggFunc::kAvg, LogicalType::Double(), DoubleArray(dbl, nulls));
+  for (const AggFunc func : {AggFunc::kMin, AggFunc::kMax}) {
+    add(func, LogicalType::Int32(), Int32Array(small, nulls));
+    add(func, LogicalType::Int64(), Int64Array(big, nulls));
+    add(func, LogicalType::Date(), testing::DateArray(days, nulls));
+    add(func, LogicalType::Decimal(10, 2), Decimal64Array(d64, 10, 2, nulls));
+    add(func, LogicalType::Decimal(30, 2), Decimal128Array(d128, 30, 2, nulls));
+    add(func, LogicalType::Double(), DoubleArray(dbl, nulls));
+    add(func, LogicalType::Varchar(), StringArray(str, nulls));
+    add(func, LogicalType::Boolean(), testing::BoolArray(flag, nulls));
+  }
+  return in;
+}
+
+std::vector<AggSpec> SpecsOf(const PartialInput& in) {
+  std::vector<AggSpec> specs;
+  for (size_t i = 0; i < in.funcs.size(); ++i) {
+    specs.push_back(in.funcs[i] == AggFunc::kCountStar ? CountStar()
+                                                       : Spec(in.funcs[i], in.types[i]));
+  }
+  return specs;
+}
+
+TEST(AggHashTableTest, MergedPartialStatesEqualASingleTableForEveryAggregate) {
+  const PartialInput all = MakePartialInput(0, 60);
+  const PartialInput first = MakePartialInput(0, 25);
+  const PartialInput second = MakePartialInput(25, 35);
+
+  AggHashTable whole({LogicalType::Int64()}, SpecsOf(all));
+  ASSERT_TRUE(whole.Update(all.keys, all.args, 60).ok());
+
+  AggHashTable merged({LogicalType::Int64()}, SpecsOf(all));
+  for (const PartialInput* part : {&first, &second}) {
+    AggHashTable partial({LogicalType::Int64()}, SpecsOf(all));
+    const int64_t rows = part->keys[0]->length();
+    ASSERT_TRUE(partial.Update(part->keys, part->args, rows).ok());
+    auto columns = partial.FinishPartial(0, partial.num_groups(), arrow::default_memory_pool());
+    ASSERT_TRUE(columns.ok()) << columns.status().ToString();
+    const auto types = partial.PartialTypes();
+    ASSERT_EQ(columns->size(), types.size());
+    for (size_t c = 0; c < types.size(); ++c) {
+      EXPECT_TRUE((*columns)[c]->type()->Equals(types[c])) << "column " << c;
+    }
+    const std::vector<std::shared_ptr<arrow::Array>> keys = {(*columns)[0]};
+    const std::vector<std::shared_ptr<arrow::Array>> states((*columns).begin() + 1,
+                                                            (*columns).end());
+    ASSERT_TRUE(merged.MergePartial(keys, states, partial.num_groups()).ok());
+  }
+  EXPECT_EQ(Rows(merged), Rows(whole));
+}
+
+TEST(AggHashTableTest, AGroupWithoutKeysMergesToo) {
+  const PartialInput first = MakePartialInput(0, 10);
+  const PartialInput second = MakePartialInput(10, 10);
+  AggHashTable whole({}, SpecsOf(first));
+  ASSERT_TRUE(whole.Update({}, first.args, 10).ok());
+  ASSERT_TRUE(whole.Update({}, second.args, 10).ok());
+  AggHashTable merged({}, SpecsOf(first));
+  for (const PartialInput* part : {&first, &second}) {
+    AggHashTable partial({}, SpecsOf(first));
+    ASSERT_TRUE(partial.Update({}, part->args, 10).ok());
+    auto columns = partial.FinishPartial(0, 1, arrow::default_memory_pool());
+    ASSERT_TRUE(columns.ok());
+    ASSERT_TRUE(merged.MergePartial({}, *columns, 1).ok());
+  }
+  EXPECT_EQ(Rows(merged), Rows(whole));
+}
+
+TEST(AggHashTableTest, ASpillableTableReportsOverBudgetInsteadOfFailingAndClearReturnsTheCharge) {
+  MemoryBudget budget(2000);
+  Reservation reservation(budget, "agg");
+  AggHashTable table({LogicalType::Int64()}, {CountStar()}, &reservation);
+  table.set_spillable(true);
+  std::vector<int64_t> keys(500);
+  for (size_t i = 0; i < keys.size(); ++i) keys[i] = static_cast<int64_t>(i);
+  ASSERT_TRUE(table.Update({Int64Array(keys)}, {nullptr}, 500).ok());
+  EXPECT_TRUE(table.over_budget());
+  EXPECT_EQ(table.num_groups(), 500);  // the rows were folded in, only the charge was refused
+  table.Clear();
+  EXPECT_FALSE(table.over_budget());
+  EXPECT_EQ(table.num_groups(), 0);
+  EXPECT_EQ(reservation.size(), 0);
+  ASSERT_TRUE(table.Update({Int64Array({1, 2, 1})}, {nullptr}, 3).ok());
+  EXPECT_FALSE(table.over_budget());
+  EXPECT_EQ(Rows(table), (std::vector<std::string>{"1|2", "2|1"}));
+}
+
 }  // namespace
 }  // namespace quarry

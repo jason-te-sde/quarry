@@ -27,17 +27,40 @@ arrow::Result<std::shared_ptr<arrow::Array>> ConcatenateArrays(
 // A batch of `length` rows whose columns are `columns`.
 Batch MakeBatch(std::vector<std::shared_ptr<arrow::Array>> columns, int64_t length);
 
+// Rows [offset, offset + length) of a batch that has no selection; the columns are shared.
+Batch SliceBatch(const Batch& batch, int64_t offset, int64_t length);
+
+// How many rows a spilling operator feeds its hash table at a time: all of them without a memory
+// limit; with one, few enough that what the table grows by in one step (and the budget does not yet
+// know about) stays small next to the budget.
+inline int64_t StateSliceRows(const ExecContext& context, int64_t rows) {
+  return context.budget->limit() > 0 ? 128 : rows;
+}
+
+// The error of a partition that does not fit the budget although it has been split as deep as
+// allowed: "resource exhausted: <owner> needs <n> bytes, budget <limit>, in use <used>, ...".
+arrow::Status PartitionTooLarge(const ExecContext& context, const std::string& owner,
+                                int64_t needed_bytes, int depth);
+
 // Charges what a hash table or buffer holds beyond what was charged before.
 class ChargedBytes {
  public:
   explicit ChargedBytes(Reservation* reservation) : reservation_(reservation) {}
   // Makes the reservation hold `bytes`: grows it, or shrinks it when `bytes` is less.
   arrow::Status Set(int64_t bytes);
+  // Like Set, but when growing would exceed the budget it changes nothing and returns false.
+  bool TrySet(int64_t bytes);
+  int64_t charged() const { return charged_; }
 
  private:
   Reservation* reservation_;
   int64_t charged_ = 0;
 };
+
+// Cancelled when the query was cancelled or is past its deadline. The profiling wrapper calls it
+// once per Next; loops that run inside one Next (spilling, merging spilled partitions) call it
+// themselves, so that a cancelled query ends promptly instead of at the end of the loop.
+arrow::Status CheckInterrupted(const ExecContext& context);
 
 // The name an operator charges its memory to: "Sort #3".
 std::string ReservationOwner(const char* kind, int id);
