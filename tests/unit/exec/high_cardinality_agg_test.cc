@@ -59,8 +59,9 @@ class HighCardinalityAggTest : public ::testing::Test {
     int64_t bytes = 0;
     for (const OperatorProfile& p : spilled->profile) {
       bytes += p.spilled_bytes;
-      EXPECT_LE(p.peak_state_bytes, kLimit + kMargin) << p.name << " #" << p.id;
+      EXPECT_LE(p.peak_state_bytes, kLimit) << p.name << " #" << p.id;
     }
+    EXPECT_LE(spilled->pool_peak_bytes, kLimit + kMargin) << "allocated beyond budget and margin";
     EXPECT_GT(bytes, 0) << "the query was meant to spill";
     EXPECT_TRUE(fs::is_empty(parent_.path()));
   }

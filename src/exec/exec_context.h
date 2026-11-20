@@ -20,6 +20,10 @@ class SpillDirectory;  // io/spill_directory.h
 // outlive the operators.
 struct ExecContext {
   arrow::MemoryPool* pool = arrow::default_memory_pool();
+  // Where scans allocate (the Parquet reader's buffers and the batches cut from them); null means
+  // `pool`. The engine gives scans a pool of their own so that the memory the budget does not
+  // charge can be measured with and without them.
+  arrow::MemoryPool* scan_pool = nullptr;
   MemoryBudget* budget = nullptr;
   SpillDirectory* spill = nullptr;
   int32_t batch_size = 2048;

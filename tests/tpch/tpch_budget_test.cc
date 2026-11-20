@@ -1,7 +1,9 @@
 // TPC-H Q1, Q3, Q5 and Q6 under a memory budget: the answer must be DuckDB's whatever the budget,
 // the joins and aggregations that do not fit must spill (Q3 and Q5 at 64 KiB), the ones that do fit
-// must not, and the state the operators charge must stay within the budget plus the margin recorded
-// in docs/design/0006-memory-and-spill.md.
+// must not, and the memory the operators allocate (the query's pool peak, which counts what the
+// budget does not charge: spill buffers, the batch in flight, concatenation copies) must stay
+// within the budget plus the margin recorded in docs/design/0006-memory-and-spill.md. Scans
+// allocate from a pool of their own, reported separately and not included.
 
 #include <gtest/gtest.h>
 
@@ -20,8 +22,8 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// What operators may hold beyond the budget: partition buffers and one input batch, which are not
-// charged.
+// What operators may allocate beyond the budget: partition buffers, one input batch and copies,
+// which are not charged.
 constexpr int64_t kMargin = 256 * 1024;
 
 std::string ReadFile(const std::string& path) {
@@ -63,8 +65,13 @@ TEST_P(TpchBudgetTest, ResultMatchesDuckDBAndStaysWithinTheBudget) {
   for (const OperatorProfile& p : result->profile) {
     spilled += p.spilled_bytes;
     if (c.budget > 0) {
-      EXPECT_LE(p.peak_state_bytes, c.budget + kMargin) << p.name << " #" << p.id;
+      EXPECT_LE(p.peak_state_bytes, c.budget) << p.name << " #" << p.id;  // the charged state
     }
+  }
+  EXPECT_GT(result->pool_peak_bytes, 0) << "the query pool measured nothing";
+  if (c.budget > 0) {
+    EXPECT_LE(result->pool_peak_bytes, c.budget + kMargin)
+        << "operators allocated far more than the budget they were charged";
   }
   const bool must_spill = c.budget == 64 * 1024 && (c.query == 3 || c.query == 5);
   const bool must_not_spill = c.budget == 0 || (c.budget == 64 * 1024 && !must_spill);

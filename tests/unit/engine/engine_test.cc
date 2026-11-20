@@ -106,7 +106,12 @@ TEST(EngineTest, ExplainAnalyzeListsEveryOperatorWithRowsBatchesTimeAndPeak) {
     return out;
   };
   const auto plan_lines = lines(*plan);
-  const auto analyzed_lines = lines(*analyzed);
+  auto analyzed_lines = lines(*analyzed);
+  // The footer: what the query's memory pools peaked at, whether or not the budget charged it.
+  ASSERT_FALSE(analyzed_lines.empty());
+  EXPECT_EQ(analyzed_lines.back().rfind("pool_peak=", 0), 0u) << analyzed_lines.back();
+  EXPECT_NE(analyzed_lines.back().find(" scan_pool_peak="), std::string::npos);
+  analyzed_lines.pop_back();
   ASSERT_EQ(plan_lines.size(), analyzed_lines.size());
   ASSERT_GE(plan_lines.size(), 12u);  // 6 scans, 5 joins, aggregate, sort, projections
   for (size_t i = 0; i < plan_lines.size(); ++i) {

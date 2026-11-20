@@ -2,6 +2,7 @@
 
 #include <system_error>
 
+#include "common/flaws.h"
 #include "exec/hash.h"
 #include "exec/key_encoding.h"
 #include "exec/operator_util.h"
@@ -63,6 +64,9 @@ arrow::Status SpillPartitions::Append(const Batch& batch, std::span<const uint64
     for (const auto& column : batch.columns) {
       ARROW_ASSIGN_OR_RAISE(auto part, Gather(*column, indices[p], context_.pool));
       columns.push_back(std::move(part));
+    }
+    if constexpr (kFlawSpillRetainsRows) {
+      retained_.push_back(MakeBatch(columns, static_cast<int64_t>(indices[p].size())));
     }
     ARROW_RETURN_NOT_OK(
         writers_[p]->Write(MakeBatch(std::move(columns), static_cast<int64_t>(indices[p].size()))));

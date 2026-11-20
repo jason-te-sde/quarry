@@ -1,10 +1,12 @@
 #include "quarry/engine.h"
 
 #include <arrow/chunked_array.h>
+#include <arrow/memory_pool.h>
 
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <numeric>
 #include <sstream>
 
 #include "binder/binder.h"
@@ -15,6 +17,7 @@
 #include "plan/explain.h"
 #include "planner/physical_planner.h"
 #include "planner/rules.h"
+#include "vector/gather.h"
 
 namespace quarry {
 namespace {
@@ -96,7 +99,18 @@ struct Engine::Impl {
       }
       ARROW_ASSIGN_OR_RAISE(spill_directory, SpillDirectory::Create(parent));
     }
+    // Every allocation of the query goes through these, so that the memory the budget does not
+    // charge can be measured. Scans get their own pool: their buffers are not charged either.
+    struct Pools {
+      arrow::ProxyMemoryPool operators{arrow::default_memory_pool()};
+      arrow::ProxyMemoryPool scans{arrow::default_memory_pool()};
+    };
+    auto pools = std::make_shared<Pools>();
+    arrow::ProxyMemoryPool& pool = pools->operators;
+    arrow::ProxyMemoryPool& scan_pool = pools->scans;
     ExecContext context;
+    context.pool = &pool;
+    context.scan_pool = &scan_pool;
     context.budget = &budget;
     context.spill = spill_directory.get();
     context.fault = options.spill_fault;
@@ -124,7 +138,19 @@ struct Engine::Impl {
         status = compact.status();
         break;
       }
-      for (size_t c = 0; c < chunks.size(); ++c) chunks[c].push_back(compact->columns[c]);
+      // The result is copied into the default pool: it belongs to the caller, not to the operators
+      // whose memory the query's pool measures.
+      std::vector<uint32_t> all(static_cast<size_t>(compact->length));
+      std::iota(all.begin(), all.end(), 0u);
+      for (size_t c = 0; c < chunks.size(); ++c) {
+        auto copy = Gather(*compact->columns[c], all, arrow::default_memory_pool());
+        if (!copy.ok()) {
+          status = copy.status();
+          break;
+        }
+        chunks[c].push_back(std::move(*copy));
+      }
+      if (!status.ok()) break;
     }
     root->Close();
     ARROW_RETURN_NOT_OK(status);
@@ -151,6 +177,8 @@ struct Engine::Impl {
       profile.scan_buffer_bytes = s.scan_buffer_bytes;
       out.result.profile.push_back(std::move(profile));
     }
+    out.result.pool_peak_bytes = pool.max_memory();
+    out.result.scan_pool_peak_bytes = scan_pool.max_memory();
     out.plan = std::move(plan);
     return out;
   }
@@ -237,6 +265,8 @@ arrow::Result<std::string> Engine::Explain(std::string_view sql, bool analyze) {
     out += '\n';
     ++index;
   }
+  out += "pool_peak=" + FormatBytes(executed.result.pool_peak_bytes) +
+         " scan_pool_peak=" + FormatBytes(executed.result.scan_pool_peak_bytes) + '\n';
   return out;
 }
 

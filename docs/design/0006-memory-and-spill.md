@@ -18,7 +18,8 @@ answer because part of a spilled partition went missing.
 Only operator state is charged to the budget: the join's build rows and hash table, the aggregate's
 group table and states, the sort buffer, the Top-N buffer. Scan buffers are not (a scan holds one
 row group; the profile reports it as `buffer=`), and neither are output batches, one input batch in
-flight, or the buffers of a spill writer. `peak_state_bytes` in EXPLAIN ANALYZE is what was charged.
+flight, or the buffers of a spill writer. `peak_state_bytes` in EXPLAIN ANALYZE is what was charged;
+what was allocated is `pool_peak` (see "The margin").
 
 Every stateful operator owns a `Reservation` on the query's `MemoryBudget`. `Grow` past the limit
 is `OutOfMemory("resource exhausted: <owner> needs <n> bytes, budget <limit>, in use <used>")`;
@@ -99,18 +100,43 @@ about n rows plus one batch and it never spills.
 | maximum depth | 3 | four splits separate 65,536 ways; deeper only helps when the hash is not the limit, and then it is key skew |
 | writer flush size | 4 KiB | small, because 16 to 32 writers buffer at once and the buffers are uncharged |
 | input slice with a limit | 128 rows | a table grows by one slice before it is charged, so the overshoot stays small next to the budget |
-| margin | 256 KiB | what operators may hold beyond the budget; see below |
+| margin | 256 KiB | what operators may allocate beyond the budget, measured by the query pool; see below |
 
-### The margin
+### The margin, and how it is measured
 
-`peak_state_bytes` can never exceed the budget, since a failed `TryGrow` charges nothing. What can
-exceed it is memory the budget does not see: the writers' pending rows (up to 4 KiB plus one batch's
-share of that partition, for each of up to 16 files, twice while a partition is being split),
-one input batch in flight, and the copy that concatenating the build rows makes. `TpchBudgetTest`
-checks `peak_state_bytes <= budget + 256 KiB` for every operator of every run; the bound is slack by
-construction, and the 256 KiB is the room these uncharged buffers get on the TPC-H shapes (rows of
-tens of bytes). Rows hundreds of bytes wide make the writers' pending rows larger, in proportion to
-row width times batch size.
+`peak_state_bytes` is the most the budget charged, and it can never pass the limit: a failed
+`TryGrow` charges nothing. It says nothing about memory the budget does not see, so it is not the
+bound. The bound is measured: every query runs with its own `arrow::ProxyMemoryPool` over the
+default pool, `ExecContext::pool`, so that operator, spill-writer and concatenation allocations are
+counted whether or not they were charged. Its peak is `QueryResult::pool_peak_bytes` and the last
+line of EXPLAIN ANALYZE (`pool_peak=`). The result table is copied out of the pool as it is
+produced (it belongs to the caller, and a large result would otherwise hide the operators' peak).
+Scans have a pool of their own (the Parquet reader allocates from it), reported as
+`scan_pool_peak_bytes` and not included, as scan buffers are not charged either.
+
+The assertion in `TpchBudgetTest` and `HighCardinalityAggTest` is `pool_peak_bytes <= limit + 256
+KiB`. Measured on SF0.01 (dev build; scan pool shown separately):
+
+| Query | budget | pool_peak | scan pool |
+| --- | --- | --- | --- |
+| Q1 | 64 KiB (also 1 MiB, unlimited) | 131.6 KiB | 321.3 KiB |
+| Q3 | 64 KiB / 1 MiB / unlimited | 130.1 / 164.1 / 164.1 KiB | 230.6 KiB |
+| Q5 | 64 KiB / 1 MiB / unlimited | 159.0 / 354.9 / 354.9 KiB | 225.6 KiB |
+| Q6 | any | 33.2 KiB | 216.6 KiB |
+| `GROUP BY l_orderkey` | 64 KiB / unlimited | 75.9 / 48.2 KiB | 96.0 KiB |
+
+The worst overshoot at 64 KiB is Q5, 159 KiB, which is 95 KiB beyond the budget: the 256 KiB margin
+holds with room, and most of Q1's 131 KiB is expression temporaries, not state. What the margin
+covers: writer buffers (up to 4 KiB plus one batch's share of that partition, for each of up to 16
+files, twice while a partition is being split), one input batch and its evaluated keys, and the copy
+that concatenating build rows makes. Rows hundreds of bytes wide scale the writer buffers with row
+width times batch size; the margin is not a guarantee for them. Memory outside Arrow's pool (the
+hash tables' `std::vector`s, which are charged by capacity) is not measured by the pool, only by the
+charge.
+
+The measurement is itself tested: `-DQUARRY_FLAW=spill_retains_rows` makes the spill keep a copy of
+every row it writes, outside any reservation. Answers stay correct and `peak_state_bytes` does not
+move, but the pool peak of Q3 and Q5 at 64 KiB becomes 1.1 and 2.2 MiB and `TpchBudgetTest` fails.
 
 ## Consequences
 
@@ -131,8 +157,9 @@ row width times batch size.
 - **Sort-merge join for the spilled case.** Needs an external sort, which does not exist.
 - **Abort the budget when reservations outlive it.** See above.
 
-## The deliberate flaw
+## The deliberate flaws
 
 `-DQUARRY_FLAW=spill_drops_last_batch` makes `SpillWriter::Finish` skip writing its buffered rows, so
 the tail of every spilled partition is lost. `TpchBudgetTest` fails under it (Q5 at 64 KiB returns no
-rows), and so do the spill and high-cardinality aggregate tests.
+rows), and so do the spill and high-cardinality aggregate tests. `spill_retains_rows` is the second
+one, described under the margin.

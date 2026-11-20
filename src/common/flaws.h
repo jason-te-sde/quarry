@@ -61,6 +61,15 @@ inline constexpr bool kFlawSpillDropsLastBatch = true;
 inline constexpr bool kFlawSpillDropsLastBatch = false;
 #endif
 
+#ifdef QUARRY_FLAW_SPILL_RETAINS_ROWS
+// Spilling keeps a copy of every row it writes in memory, outside any reservation: the spill is
+// correct but the memory budget no longer bounds the process, which only a measurement of the
+// allocations (the query's pool peak) can show.
+inline constexpr bool kFlawSpillRetainsRows = true;
+#else
+inline constexpr bool kFlawSpillRetainsRows = false;
+#endif
+
 }  // namespace quarry
 
 #endif  // QUARRY_COMMON_FLAWS_H_

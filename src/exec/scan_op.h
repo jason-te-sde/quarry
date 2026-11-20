@@ -43,6 +43,9 @@ class ScanOperator : public Operator {
  private:
   struct FileState;
 
+  arrow::MemoryPool* ScanPool() const {
+    return context_->scan_pool != nullptr ? context_->scan_pool : context_->pool;
+  }
   arrow::Status OpenFile(size_t index);
   // Loads the next row group that survives pruning; false at the end of the last file.
   arrow::Result<bool> LoadNextRowGroup();

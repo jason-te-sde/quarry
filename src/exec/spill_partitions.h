@@ -74,6 +74,7 @@ class SpillPartitions {
   std::array<std::filesystem::path, kSpillFanout> paths_;
   std::array<int64_t, kSpillFanout> rows_{};
   int64_t finished_bytes_ = 0;
+  std::vector<Batch> retained_;  // only under kFlawSpillRetainsRows
 };
 
 // Deletes a spill file once it has been read; the directory removes whatever is left.

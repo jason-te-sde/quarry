@@ -43,6 +43,12 @@ struct OperatorProfile {
 struct QueryResult {
   std::shared_ptr<arrow::Table> table;
   std::vector<OperatorProfile> profile;  // one entry per operator, by id
+  // The most memory the query's operators held through Arrow's memory pool at once: build rows,
+  // sort and aggregate buffers, spill buffers and concatenation copies, whether or not the memory
+  // budget charged them. The result table is copied out of the pool as it is produced, so it is not
+  // counted. Scans allocate from a pool of their own, reported next to it.
+  int64_t pool_peak_bytes = 0;
+  int64_t scan_pool_peak_bytes = 0;
 };
 
 // A SQL query engine over Parquet tables. Register tables, then Execute queries. Every error is a

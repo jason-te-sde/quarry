@@ -228,7 +228,7 @@ arrow::Result<bool> ScanOperator::LoadNextRowGroup() {
     try {
       if (file.reader == nullptr) {
         ARROW_ASSIGN_OR_RAISE(auto input, arrow::io::ReadableFile::Open(file.path.string()));
-        ARROW_ASSIGN_OR_RAISE(file.reader, parquet::arrow::OpenFile(input, context_->pool));
+        ARROW_ASSIGN_OR_RAISE(file.reader, parquet::arrow::OpenFile(input, ScanPool()));
       }
       ARROW_ASSIGN_OR_RAISE(table, file.reader->ReadRowGroup(group, file.file_columns));
     } catch (const parquet::ParquetStatusException& e) {
@@ -237,7 +237,7 @@ arrow::Result<bool> ScanOperator::LoadNextRowGroup() {
       return arrow::Status::IOError(file.path.string(), ": ", e.what());
     }
     report_.row_groups_read.emplace_back(static_cast<int>(file_), group);
-    ARROW_ASSIGN_OR_RAISE(table, table->CombineChunks(context_->pool));
+    ARROW_ASSIGN_OR_RAISE(table, table->CombineChunks(ScanPool()));
     group_rows_ = table->num_rows();
     position_ = 0;
     columns_.clear();
@@ -248,12 +248,12 @@ arrow::Result<bool> ScanOperator::LoadNextRowGroup() {
       if (chunked->num_chunks() == 1) {
         array = chunked->chunk(0);
       } else {
-        ARROW_ASSIGN_OR_RAISE(array, arrow::MakeEmptyArray(chunked->type(), context_->pool));
+        ARROW_ASSIGN_OR_RAISE(array, arrow::MakeEmptyArray(chunked->type(), ScanPool()));
       }
       const LogicalType& type = node_.columns[i].type;
       buffer_bytes += BufferBytes(*array);
       if (type.is_decimal64() && array->type_id() == arrow::Type::DECIMAL128) {
-        ARROW_ASSIGN_OR_RAISE(array, eval_internal::NarrowDecimal128(*array, context_->pool));
+        ARROW_ASSIGN_OR_RAISE(array, eval_internal::NarrowDecimal128(*array, ScanPool()));
       }
       if (!array->type()->Equals(*type.ToArrow())) {
         return arrow::Status::Invalid(file.path.string(), ": column ", node_.columns[i].name,
