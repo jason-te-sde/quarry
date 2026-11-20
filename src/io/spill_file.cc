@@ -15,7 +15,7 @@ arrow::Status CallFault(const SpillFault& fault, std::string_view site) {
 
 }  // namespace
 
-arrow::Result<std::unique_ptr<SpillWriter>> SpillWriter::Open(std::filesystem::path path,
+arrow::Result<std::unique_ptr<SpillWriter>> SpillWriter::Open(const std::filesystem::path& path,
                                                               std::shared_ptr<arrow::Schema> schema,
                                                               SpillFault fault,
                                                               arrow::MemoryPool* pool) {
@@ -94,7 +94,7 @@ arrow::Status SpillWriter::Finish() {
   return sink_->Close();
 }
 
-arrow::Result<std::unique_ptr<SpillReader>> SpillReader::Open(std::filesystem::path path,
+arrow::Result<std::unique_ptr<SpillReader>> SpillReader::Open(const std::filesystem::path& path,
                                                               SpillFault fault) {
   std::unique_ptr<SpillReader> reader(new SpillReader());
   reader->fault_ = std::move(fault);

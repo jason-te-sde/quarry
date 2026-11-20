@@ -35,8 +35,8 @@ inline constexpr int64_t kSpillFlushBytes = 4096;
 class SpillWriter {
  public:
   static arrow::Result<std::unique_ptr<SpillWriter>> Open(
-      std::filesystem::path path, std::shared_ptr<arrow::Schema> schema, SpillFault fault = {},
-      arrow::MemoryPool* pool = arrow::default_memory_pool());
+      const std::filesystem::path& path, std::shared_ptr<arrow::Schema> schema,
+      SpillFault fault = {}, arrow::MemoryPool* pool = arrow::default_memory_pool());
   ~SpillWriter();
   SpillWriter(const SpillWriter&) = delete;
   SpillWriter& operator=(const SpillWriter&) = delete;
@@ -70,7 +70,7 @@ class SpillWriter {
 // Reads a file a SpillWriter wrote, one record batch at a time.
 class SpillReader {
  public:
-  static arrow::Result<std::unique_ptr<SpillReader>> Open(std::filesystem::path path,
+  static arrow::Result<std::unique_ptr<SpillReader>> Open(const std::filesystem::path& path,
                                                           SpillFault fault = {});
   ~SpillReader() = default;
   SpillReader(const SpillReader&) = delete;

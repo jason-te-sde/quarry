@@ -116,6 +116,7 @@ class HashJoinOperator final : public Operator {
     for (int64_t offset = 0; offset < batch.length; offset += step) {
       const int64_t length = std::min(step, batch.length - offset);
       std::vector<std::shared_ptr<arrow::Array>> key_slice;
+      key_slice.reserve(keys.size());
       for (const auto& key : keys) key_slice.push_back(key->Slice(offset, length));
       Batch slice = SliceBatch(batch, offset, length);
       ARROW_RETURN_NOT_OK(table_.Insert(key_slice, length));
@@ -129,6 +130,7 @@ class HashJoinOperator final : public Operator {
       const int64_t rest = offset + length;
       if (rest >= batch.length) return arrow::Status::OK();
       std::vector<std::shared_ptr<arrow::Array>> rest_keys;
+      rest_keys.reserve(keys.size());
       for (const auto& key : keys) rest_keys.push_back(key->Slice(rest, batch.length - rest));
       return SinkBuildRows(SliceBatch(batch, rest, batch.length - rest), rest_keys);
     }
@@ -166,6 +168,7 @@ class HashJoinOperator final : public Operator {
 
   static std::vector<std::shared_ptr<arrow::DataType>> OutputArrowTypes(const PhysicalNode& node) {
     std::vector<std::shared_ptr<arrow::DataType>> types;
+    types.reserve(node.output_types.size());
     for (const LogicalType& type : node.output_types) types.push_back(type.ToArrow());
     return types;
   }

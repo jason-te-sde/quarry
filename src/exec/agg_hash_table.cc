@@ -724,6 +724,7 @@ arrow::Status AggHashTable::Update(const std::vector<std::shared_ptr<arrow::Arra
 
 std::vector<std::shared_ptr<arrow::DataType>> AggHashTable::PartialTypes() const {
   std::vector<std::shared_ptr<arrow::DataType>> types;
+  types.reserve(key_types_.size() + states_.size());
   for (const LogicalType& t : key_types_) types.push_back(t.ToArrow());
   for (const auto& state : states_) {
     for (auto& type : state->PartialTypes()) types.push_back(std::move(type));

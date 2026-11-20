@@ -68,8 +68,12 @@ TEST_P(TpchBudgetTest, ResultMatchesDuckDBAndStaysWithinTheBudget) {
   }
   const bool must_spill = c.budget == 64 * 1024 && (c.query == 3 || c.query == 5);
   const bool must_not_spill = c.budget == 0 || (c.budget == 64 * 1024 && !must_spill);
-  if (must_spill) EXPECT_GT(spilled, 0) << "the budget was meant to force a spill";
-  if (must_not_spill) EXPECT_EQ(spilled, 0) << "nothing here needs to spill";
+  if (must_spill) {
+    EXPECT_GT(spilled, 0) << "the budget was meant to force a spill";
+  }
+  if (must_not_spill) {
+    EXPECT_EQ(spilled, 0) << "nothing here needs to spill";
+  }
   EXPECT_TRUE(fs::is_empty(spill_parent.path())) << "spill files were left behind";
 }
 
