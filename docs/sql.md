@@ -45,6 +45,65 @@ Numbers meet as follows. An `INTEGER` meeting a `DECIMAL` is `DECIMAL(10,0)`, a 
   error.
 - `NULL` sorts last, ascending and descending.
 
+## Grammar
+
+One `SELECT` statement, optionally ended by `;`. Keywords are case-insensitive, `--` starts a comment
+that runs to the end of the line.
+
+```ebnf
+statement   = "SELECT" item { "," item } "FROM" from { "," from }
+              [ "WHERE" expr ] [ "GROUP" "BY" expr { "," expr } ] [ "HAVING" expr ]
+              [ "ORDER" "BY" key { "," key } ] [ "LIMIT" integer ] [ ";" ] ;
+item        = expr [ [ "AS" ] alias ] ;
+from        = table { [ "INNER" ] "JOIN" table "ON" expr } ;
+table       = name [ [ "AS" ] alias ] ;
+key         = expr [ "ASC" | "DESC" ] [ "NULLS" ( "FIRST" | "LAST" ) ] ;
+expr        = or ;
+or          = and { "OR" and } ;
+and         = not { "AND" not } ;
+not         = "NOT" not | predicate ;
+predicate   = sum [ ( "=" | "<>" | "!=" | "<" | "<=" | ">" | ">=" ) sum
+                  | "IS" [ "NOT" ] "NULL"
+                  | [ "NOT" ] "BETWEEN" sum "AND" sum
+                  | [ "NOT" ] "IN" "(" expr { "," expr } ")" ] ;
+sum         = product { ( "+" | "-" ) product } ;
+product     = unary { "*" unary } ;
+unary       = ( "-" | "+" ) unary | primary ;
+primary     = integer | decimal | string | "TRUE" | "FALSE" | "NULL"
+            | "DATE" string | "INTERVAL" string ( "DAY" | "MONTH" | "YEAR" )
+            | [ name "." ] name
+            | ( "SUM" | "AVG" | "COUNT" | "MIN" | "MAX" ) "(" ( "*" | expr ) ")"
+            | "(" expr ")" ;
+```
+
+Expressions may nest 256 levels deep (parentheses, chains of `NOT` or unary minus, and the height of
+the expression tree, so a chain of 257 `+` is refused); a deeper statement is a syntax error that
+says "nesting too deep". Not supported, and refused with a message that says so: `/`, `SELECT *`,
+`DISTINCT`, subqueries, outer and cross joins, `LIKE`, `CASE`, `UNION`, `OFFSET`, `EXISTS`, and
+exponent notation in numbers.
+
+## Names
+
+- An unquoted identifier is case-insensitive (`SELECT L_QUANTITY FROM LineItem` works); a quoted one
+  is exact, and table and column names are stored in lower case, so `"L_QUANTITY"` is an unknown
+  column.
+- An unqualified column that two FROM items have is a binder error that lists both candidates
+  (`lineitem.x, orders.x`). A table alias hides the table's own name.
+- A select alias can be used in `ORDER BY` but not in `WHERE`, `GROUP BY` or `HAVING`. An ordinal
+  (`ORDER BY 1`, `GROUP BY 1`) is a binder error.
+- `ORDER BY` takes an alias, a select expression or any other expression; `NULLS FIRST` and `NULLS
+  LAST` are recorded on every sort key, and the default is `NULLS LAST` for both directions.
+- In a query with aggregates or `GROUP BY`, a column outside an aggregate must be a `GROUP BY`
+  expression (compared as a bound expression, so `GROUP BY a + 1` allows `SELECT a + 1`).
+- `DATE '...' +/- INTERVAL 'n' DAY|MONTH|YEAR` is folded by the binder when the date is a literal;
+  an interval anywhere else is a binder error.
+- A table of several Parquet files registers even when the files disagree on a column's type, or a
+  column has an unsupported type (FLOAT, UINT64, TIMESTAMP, LIST, DECIMAL with p > 38) or is
+  missing from a later file: that column is unusable, and naming it is a binder error that gives
+  the column, the types and the file. The other columns stay usable.
+- Errors read `<kind> error at <line>:<column>: <message>`, kind `syntax` or `binder`, and the
+  position is the offending token.
+
 ## DuckDB's type table
 
 Produced by running `uv run scripts/duckdb_types.py`; `TypeRulesTest.DocsTableMatchesTheRules` checks every

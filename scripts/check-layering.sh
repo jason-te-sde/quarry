@@ -43,7 +43,7 @@ layer_allows() {
     vector) echo "types vector" ;;
     expr) echo "types vector expr" ;;
     parser) echo "parser" ;;
-    binder) echo "parser types vector expr binder" ;;
+    binder) echo "parser types vector expr io plan binder" ;;
     plan) echo "types vector expr plan" ;;
     planner) echo "binder parser types vector expr plan planner" ;;
     io) echo "types vector io" ;;

@@ -1,0 +1,77 @@
+# Statements that parse and bind.
+
+ok
+SELECT L_QUANTITY FROM LineItem
+
+ok
+SELECT l_returnflag, SUM(l_quantity) AS q FROM lineitem GROUP BY l_returnflag HAVING SUM(l_quantity) > 10 ORDER BY q DESC NULLS FIRST LIMIT 5
+
+ok
+SELECT n_name, r_name FROM nation JOIN region ON n_regionkey = r_regionkey WHERE r_name = 'ASIA'
+
+ok
+SELECT COUNT(*), MIN(o_orderdate), MAX(o_orderdate), AVG(o_totalprice) FROM orders
+
+ok
+SELECT r_name FROM region WHERE r_regionkey IN (-1, 2) AND .5 < 1 AND -0.5 IN (-0.5)
+
+ok
+SELECT n_name FROM nation INNER JOIN region ON n_regionkey = r_regionkey JOIN customer ON c_nationkey = n_nationkey
+
+ok
+SELECT r_name, COUNT(*) FROM region GROUP BY r_name HAVING r_name = 'ASIA'
+
+ok
+SELECT l_orderkey FROM lineitem GROUP BY l_orderkey ORDER BY SUM(l_quantity) DESC
+
+ok
+SELECT -r_regionkey, r_name IS NULL OR NOT r_name = 'a' FROM region
+
+ok
+SELECT COUNT(*) FROM region
+
+# Binder errors: the position is the offending name or expression.
+
+error binder 1:8 unknown column L_QUANTITY
+SELECT "L_QUANTITY" FROM lineitem
+
+error binder 1:15 unknown table LineItem
+SELECT 1 FROM "LineItem"
+
+error binder 1:8 unknown column nope
+SELECT nope FROM region
+
+error binder 3:7 unknown column nope
+SELECT 1
+FROM region
+WHERE nope = 1
+
+error binder 1:8 n1.n_name, n2.n_name
+SELECT n_name FROM nation n1, nation n2
+
+error binder 1:23 more than once
+SELECT 1 FROM region, region
+
+error binder 1:39 aggregate functions are not allowed in WHERE
+SELECT l_orderkey FROM lineitem WHERE SUM(l_quantity) > 1
+
+error binder 1:8 must appear in the GROUP BY clause
+SELECT l_returnflag, COUNT(*) FROM lineitem
+
+error binder 1:8 must appear in the GROUP BY clause
+SELECT l_returnflag FROM lineitem GROUP BY l_linestatus
+
+error binder 1:49 ORDER BY ordinals are not supported
+SELECT r_name, r_regionkey FROM region ORDER BY 2
+
+error binder 1:36 GROUP BY ordinals are not supported
+SELECT r_name FROM region GROUP BY 1
+
+error binder 1:33 WHERE must be a BOOLEAN expression
+SELECT r_name FROM region WHERE r_regionkey
+
+error binder 1:33 unknown function foo
+SELECT r_name FROM region WHERE foo(r_name) = 1
+
+error binder 1:19 constant DATE
+SELECT l_shipdate + INTERVAL '1' DAY FROM lineitem

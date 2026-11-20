@@ -127,6 +127,57 @@ jobs:
       - name: Test
         run: ctest --test-dir build/ci --output-on-failure --no-tests=error
 
+  # libFuzzer, 60 seconds per target, with AddressSanitizer and UBSan. A crash, a sanitizer report or
+  # a stack overflow fails the job and uploads the input that caused it.
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build clang-18 libclang-rt-18-dev
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-clang-18
+          key: arrow-${{ env.ARROW_VERSION }}-clang-18-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: bash scripts/build_arrow.sh
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: cmake --preset fuzz
+
+      - name: Build the fuzz targets
+        run: cmake --build build/fuzz --target fuzz_parser
+
+      - name: Fuzz the parser
+        run: |
+          mkdir -p build/fuzz/corpus-parser
+          cp tests/tpch/queries/*.sql build/fuzz/corpus-parser/
+          build/fuzz/fuzz/fuzz_parser build/fuzz/corpus-parser -max_total_time=60 -max_len=65536 \
+            -artifact_prefix=build/fuzz/crash-
+
+      - name: Keep the failing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash
+          path: build/fuzz/crash-*
+          if-no-files-found: ignore
+
   # The macOS job runs only once the repository is public: macOS runners are metered while it is
   # private.
   build-test-macos:
