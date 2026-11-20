@@ -57,8 +57,12 @@ TEST(CatalogTest, DecimalColumnsAreDecimalsAndDatesAreDates) {
   ASSERT_NE(lineitem, nullptr);
   for (const ColumnInfo& c : lineitem->columns) {
     EXPECT_TRUE(c.type.has_value()) << c.name << ": " << c.unsupported_reason;
-    if (c.name == "l_quantity") EXPECT_EQ(c.type->ToString(), "DECIMAL(15,2)");
-    if (c.name == "l_shipdate") EXPECT_EQ(c.type->ToString(), "DATE");
+    if (c.name == "l_quantity") {
+      EXPECT_EQ(c.type->ToString(), "DECIMAL(15,2)");
+    }
+    if (c.name == "l_shipdate") {
+      EXPECT_EQ(c.type->ToString(), "DATE");
+    }
   }
 }
 
@@ -69,9 +73,9 @@ TEST(CatalogTest, AddDirectoryMapsFilesAndSubdirectories) {
   WriteParquet(dir.path() / "multi" / "part-2.parquet", {Int32Column("a", {3})});
   WriteParquet(dir.path() / "multi" / "part-1.parquet", {Int32Column("a", {1, 2})});
   std::filesystem::create_directories(dir.path() / "empty");
-  {
-    std::ofstream(dir.path() / "notes.txt") << "not parquet";
-  }
+  std::ofstream notes(dir.path() / "notes.txt");
+  notes << "not parquet";
+  notes.close();
 
   Catalog catalog;
   ASSERT_TRUE(catalog.AddDirectory(dir.path()).ok());
