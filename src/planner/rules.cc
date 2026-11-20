@@ -350,7 +350,11 @@ arrow::Status ValidateRuleNames(const std::set<std::string>& names) {
     for (const std::string_view rule : kRuleNames) {
       valid += (valid.empty() ? "" : ", ") + std::string(rule);
     }
-    return arrow::Status::Invalid("unknown rule '" + name + "': the rules are " + valid);
+    std::string message = "unknown rule '";
+    message += name;
+    message += "': the rules are ";
+    message += valid;
+    return arrow::Status::Invalid(message);
   }
   return arrow::Status::OK();
 }

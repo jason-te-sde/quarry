@@ -124,6 +124,7 @@ arrow::Result<JoinTree> BuildJoinTree(std::vector<LogicalPlan> relations,
 
   // The order of the relations.
   std::vector<double> rows;
+  rows.reserve(n);
   for (const LogicalPlan& r : relations) rows.push_back(EstimateRows(*r));
   std::vector<size_t> order;
   std::vector<bool> placed(n, false);

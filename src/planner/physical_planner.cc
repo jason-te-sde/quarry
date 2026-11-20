@@ -3,6 +3,7 @@
 #include <arrow/scalar.h>
 
 #include <algorithm>
+#include <optional>
 #include <utility>
 
 #include "binder/catalog.h"
@@ -87,15 +88,20 @@ ExprPtr PrunableForm(const BoundExpr& conjunct) {
   return nullptr;
 }
 
-PhysicalPlan ConvertScan(const LogicalScan& scan, bool prune_row_groups) {
+arrow::Result<PhysicalPlan> ConvertScan(const LogicalScan& scan, bool prune_row_groups) {
   auto node = Make<PhysicalScan>(scan);
   node->table = scan.table;
   node->table_name = scan.table_name;
   if (scan.table != nullptr) node->files = scan.table->files;
   for (const int c : scan.columns) {
     const size_t index = static_cast<size_t>(c);
-    node->columns.push_back(
-        PhysicalColumn{c, scan.table_column_names[index], *scan.table_column_types[index]});
+    const std::optional<LogicalType>& type = scan.table_column_types[index];
+    if (!type.has_value()) {
+      return arrow::Status::Invalid("planner error at 1:1: scan of " + scan.table_name +
+                                    " lists column " + scan.table_column_names[index] +
+                                    ", which has no supported type");
+    }
+    node->columns.push_back(PhysicalColumn{c, scan.table_column_names[index], *type});
   }
   node->predicate = AndAll(CloneAll(scan.filters));
   if (prune_row_groups) {
@@ -108,7 +114,7 @@ PhysicalPlan ConvertScan(const LogicalScan& scan, bool prune_row_groups) {
       }
     }
   }
-  return node;
+  return PhysicalPlan(std::move(node));
 }
 
 arrow::Result<PhysicalPlan> Convert(const LogicalNode& logical, bool prune_row_groups);

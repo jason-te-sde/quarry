@@ -58,6 +58,7 @@ std::vector<LogicalPlan*> ChildSlots(LogicalNode& node) {
     }
     case LogicalKind::kCrossProduct: {
       std::vector<LogicalPlan*> out;
+      out.reserve(static_cast<LogicalCrossProduct&>(node).children.size());
       for (LogicalPlan& c : static_cast<LogicalCrossProduct&>(node).children) out.push_back(&c);
       return out;
     }

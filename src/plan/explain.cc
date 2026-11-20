@@ -38,11 +38,13 @@ std::string Params(const PhysicalNode& node) {
     case PhysicalKind::kScan: {
       const auto& scan = static_cast<const PhysicalScan&>(node);
       std::vector<std::string> names;
+      names.reserve(scan.columns.size());
       for (const PhysicalColumn& c : scan.columns) names.push_back(c.name);
       std::string out = scan.table_name + "; cols=" + Join(names, ",");
       if (scan.predicate != nullptr) out += "; filter=" + scan.predicate->ToString();
       if (!scan.prune_conjuncts.empty()) {
         std::vector<std::string> conjuncts;
+        conjuncts.reserve(scan.prune_conjuncts.size());
         for (const ExprPtr& c : scan.prune_conjuncts) conjuncts.push_back(c->ToString());
         out += "; prune=" + Join(conjuncts, " AND ");
       }
@@ -53,6 +55,7 @@ std::string Params(const PhysicalNode& node) {
     case PhysicalKind::kProject: {
       const auto& project = static_cast<const PhysicalProject&>(node);
       std::vector<std::string> parts;
+      parts.reserve(project.exprs.size());
       for (size_t i = 0; i < project.exprs.size(); ++i) {
         parts.push_back(project.exprs[i]->ToString() + " AS " + project.names[i]);
       }
@@ -68,6 +71,7 @@ std::string Params(const PhysicalNode& node) {
     case PhysicalKind::kHashAggregate: {
       const auto& aggregate = static_cast<const PhysicalHashAggregate&>(node);
       std::vector<std::string> aggs;
+      aggs.reserve(aggregate.aggregates.size());
       for (const AggregateExpr& a : aggregate.aggregates) {
         const std::string call =
             a.arg == nullptr ? std::string(AggFuncName(a.func))
