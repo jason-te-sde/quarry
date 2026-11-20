@@ -292,6 +292,28 @@ TEST(BinderTest, LiteralsAndTheirTypes) {
   EXPECT_TRUE(Contains(ErrorOf("select 99999999999999999999 from region"), "out of range"));
 }
 
+TEST(BinderTest, IntegerMinimumLiteralFollowsDuckDbsTyping) {
+  // A lone -2147483648 is a BIGINT (its magnitude is), and so is -9223372036854775808, which
+  // used to be refused. Next to an INTEGER in arithmetic the literal is an INTEGER, as in DuckDB,
+  // so that the sum overflows as an INTEGER and the decimal width of a mixed expression agrees.
+  const auto plan = MustBind(
+      "select -2147483648, -2147483649, -9223372036854775808, n_nationkey + -2147483648, "
+      "-2147483648 * n_nationkey, n_regionkey - -2147483648, -2147483648 + n_nationkey * 1.5, "
+      "-2147483648 + 1 from nation");
+  ASSERT_NE(plan, nullptr);
+  const auto types = plan->output_types();
+  ASSERT_EQ(types.size(), 8u);
+  EXPECT_EQ(types[0].ToString(), "BIGINT");
+  EXPECT_EQ(types[1].ToString(), "BIGINT");
+  EXPECT_EQ(types[2].ToString(), "BIGINT");
+  EXPECT_EQ(types[3].ToString(), "INTEGER");
+  EXPECT_EQ(types[4].ToString(), "INTEGER");
+  EXPECT_EQ(types[5].ToString(), "INTEGER");
+  EXPECT_EQ(types[6].ToString(), "DECIMAL(21,1)");
+  EXPECT_EQ(types[7].ToString(), "BIGINT");
+  EXPECT_TRUE(Contains(ErrorOf("select -9223372036854775809 from region"), "out of range"));
+}
+
 TEST(BinderTest, NullTakesTheTypeOfTheOtherOperand) {
   EXPECT_NE(MustBind("select 1 from nation where n_name = null"), nullptr);
   EXPECT_NE(MustBind("select 1 from nation where null = n_nationkey"), nullptr);

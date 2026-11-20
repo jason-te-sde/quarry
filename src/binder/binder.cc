@@ -175,6 +175,26 @@ std::shared_ptr<arrow::Scalar> NegatedLiteral(const arrow::Scalar& s) {
   }
 }
 
+// A BIGINT literal whose value fits an INTEGER takes part in INTEGER arithmetic as an INTEGER when
+// the other operand is an INTEGER that is not itself a literal: DuckDB reads `si + -2147483648` as
+// INTEGER + INTEGER (so it overflows like one), while a lone -2147483648 or one next to a BIGINT or
+// a DECIMAL stays a BIGINT. Only -2147483648 can differ, because every other value that fits is an
+// INTEGER literal to begin with.
+arrow::Status NarrowLiteralToInteger(ExprPtr& literal, const ExprPtr& other) {
+  if (other->type.id != TypeId::kInt32 || other->kind == ExprKind::kLiteral ||
+      literal->kind != ExprKind::kLiteral || literal->literal == nullptr ||
+      !literal->literal->is_valid || literal->literal->type->id() != arrow::Type::INT64) {
+    return arrow::Status::OK();
+  }
+  const int64_t v = static_cast<const arrow::Int64Scalar&>(*literal->literal).value;
+  if (v < std::numeric_limits<int32_t>::min() || v > std::numeric_limits<int32_t>::max()) {
+    return arrow::Status::OK();
+  }
+  ARROW_ASSIGN_OR_RAISE(literal,
+                        MakeLiteral(std::make_shared<arrow::Int32Scalar>(static_cast<int32_t>(v))));
+  return arrow::Status::OK();
+}
+
 // ---- the binder ----
 
 enum class Clause : uint8_t {
@@ -489,6 +509,11 @@ ExprResult Binder::BindBinary(const ast::Expr& e, const ExprContext& ctx) {
     ARROW_ASSIGN_OR_RAISE(l, BindExpr(lhs, ctx));
     ARROW_ASSIGN_OR_RAISE(r, BindOperand(rhs, ctx, &l->type));
   }
+  if (e.binary_op == ast::BinOp::kAdd || e.binary_op == ast::BinOp::kSub ||
+      e.binary_op == ast::BinOp::kMul) {
+    ARROW_RETURN_NOT_OK(NarrowLiteralToInteger(l, r));
+    ARROW_RETURN_NOT_OK(NarrowLiteralToInteger(r, l));
+  }
   return At(e.pos, MakeBinary(ToBinaryOp(e.binary_op), std::move(l), std::move(r)));
 }
 
@@ -585,6 +610,13 @@ ExprResult Binder::BindExpr(const ast::Expr& e, const ExprContext& ctx) {
       return column;
     }
     case AstKind::kUnary: {
+      // -9223372036854775808: the magnitude alone does not fit a BIGINT, the negative value does.
+      if (e.unary_op == ast::UnaryOp::kNegate && e.children[0]->kind == AstKind::kInteger &&
+          e.children[0]->text == "9223372036854775808") {
+        return At(
+            e.pos,
+            MakeLiteral(std::make_shared<arrow::Int64Scalar>(std::numeric_limits<int64_t>::min())));
+      }
       ARROW_ASSIGN_OR_RAISE(ExprPtr child, BindExpr(*e.children[0], ctx));
       if (e.unary_op == ast::UnaryOp::kNot) return At(e.pos, MakeNot(std::move(child)));
       if (child->kind == ExprKind::kLiteral) {
