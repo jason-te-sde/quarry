@@ -140,7 +140,7 @@ RandomBatch MakeRandomBatch(Random& rng, uint64_t seed) {
   return out;
 }
 
-enum class Category { kBool, kNumber, kDate, kString };
+enum class Category { kLogical, kNumeric, kCalendar, kText };
 
 class ExpressionGenerator {
  public:
@@ -148,13 +148,13 @@ class ExpressionGenerator {
 
   ExprPtr Generate(Category category, int depth) {
     switch (category) {
-      case Category::kBool:
+      case Category::kLogical:
         return Bool(depth);
-      case Category::kNumber:
+      case Category::kNumeric:
         return Number(depth);
-      case Category::kDate:
+      case Category::kCalendar:
         return Date(depth);
-      case Category::kString:
+      case Category::kText:
         return String(depth);
     }
     return nullptr;
@@ -295,9 +295,9 @@ class ExpressionGenerator {
         std::vector<std::shared_ptr<arrow::Scalar>> list;
         const int64_t size = rng_.Between(1, 4);
         for (int64_t i = 0; i < size; ++i) {
-          auto scalar = category == Category::kNumber ? NumberScalar()
-                        : category == Category::kDate ? RandomScalar(kDate)
-                                                      : RandomScalar(kStr);
+          auto scalar = category == Category::kNumeric    ? NumberScalar()
+                        : category == Category::kCalendar ? RandomScalar(kDate)
+                                                          : RandomScalar(kStr);
           list.push_back(std::move(scalar));
         }
         ExprPtr in_list = Take(MakeInList(std::move(operand), std::move(list)), leaf);
@@ -329,10 +329,10 @@ void CheckSeed(uint64_t seed, int* errors) {
   RandomBatch random = MakeRandomBatch(rng, seed);
   ExpressionGenerator generator(rng);
   const int64_t root = rng.Between(0, 9);
-  const Category category = root <= 5   ? Category::kBool
-                            : root <= 7 ? Category::kNumber
-                            : root == 8 ? Category::kDate
-                                        : Category::kString;
+  const Category category = root <= 5   ? Category::kLogical
+                            : root <= 7 ? Category::kNumeric
+                            : root == 8 ? Category::kCalendar
+                                        : Category::kText;
   const ExprPtr expr = generator.Generate(category, 4);
   SCOPED_TRACE("seed " + std::to_string(seed) + ", expression " + expr->ToString() + ", rows " +
                std::to_string(random.active_rows.size()));
@@ -359,7 +359,7 @@ void CheckSeed(uint64_t seed, int* errors) {
         << test::ValueToString((*expected)[i]);
   }
 
-  if (category == Category::kBool) {
+  if (category == Category::kLogical) {
     const auto selection = EvaluatePredicate(*expr, random.batch, arrow::default_memory_pool());
     ASSERT_TRUE(selection.ok()) << selection.status().ToString();
     std::vector<uint32_t> want;
