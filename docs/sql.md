@@ -78,9 +78,65 @@ primary     = integer | decimal | string | "TRUE" | "FALSE" | "NULL"
 
 Expressions may nest 256 levels deep (parentheses, chains of `NOT` or unary minus, and the height of
 the expression tree, so a chain of 257 `+` is refused); a deeper statement is a syntax error that
-says "nesting too deep". Not supported, and refused with a message that says so: `/`, `SELECT *`,
-`DISTINCT`, subqueries, outer and cross joins, `LIKE`, `CASE`, `UNION`, `OFFSET`, `EXISTS`, and
-exponent notation in numbers.
+says "nesting too deep". What is refused, and how, is listed under [Refused](#refused).
+
+## Literals and identifiers
+
+- An integer literal is `INTEGER` when it fits 32 bits and `BIGINT` when it fits 64; a larger one is
+  a binder error ("integer literal ... is out of range"). `-9223372036854775808` is accepted.
+- A decimal literal has a point followed by digits (`.5` and `0.05` are both fine, `1.` is not); its
+  precision is its number of digits and its scale the number after the point, so `0.05` is
+  `DECIMAL(3,2)`. There is no exponent
+  notation: `1e5` is a syntax error ("a number may not be followed by 'e'").
+- A string literal is single-quoted, a quote inside it is doubled (`'it''s'`), and its type is
+  `VARCHAR`.
+- `TRUE` and `FALSE` are `BOOLEAN`. A bare `NULL` is an `INTEGER` NULL, as in DuckDB, and takes the type
+  of the other operand when it sits next to one (`x = NULL`, `x IN (1, NULL)`, `BETWEEN NULL AND 5`).
+- `DATE 'YYYY-MM-DD'` is a `DATE`; a date that does not exist is an error. `INTERVAL 'n' DAY`, `MONTH`
+  or `YEAR` takes an integer of at most nine digits and may only follow `+` or `-` after a constant
+  `DATE` (see Names).
+- A double-quoted identifier may contain spaces and other characters, a doubled quote inside it stands for one, and it
+  may not be empty. A reserved word that quarry does not implement (below) is usable as a name only
+  when quoted.
+
+## Predicates and aggregates
+
+- `WHERE`, `HAVING` and `JOIN ... ON` conditions must be `BOOLEAN`. A row for which the condition is
+  `NULL` is dropped.
+- The values of an `IN` list must be constants (literals, or a `DATE` literal with an interval, which
+  is folded); an expression, a column or a subquery there is a binder error. They take the type of
+  the left side. `NOT IN` and `NOT BETWEEN` are the negation of `IN` and `BETWEEN`.
+- In `JOIN ... ON`, each equality between an expression of the left input and one of the right input
+  is a join key (the two sides are brought to a common type); every other condition of the `ON`
+  clause is applied to the joined rows.
+- The aggregates are `SUM`, `AVG`, `COUNT`, `MIN` and `MAX` over one expression, and `COUNT(*)`; any
+  other function name is "unknown function", and `SUM(*)` is an error ("only COUNT(*) takes a star").
+  Aggregates may appear in the select list, `HAVING` and `ORDER BY`. They may not appear in `WHERE`,
+  `GROUP BY` or `ON` ("aggregate functions are not allowed in ..."), and they may not nest.
+- A query with a `HAVING` clause or an aggregate anywhere but no `GROUP BY` is one group over all
+  the rows that pass the `WHERE`. `COUNT` ignores `NULL`s; `COUNT(*)` counts rows. `SUM`, `AVG`, `MIN`
+  and `MAX` of no non-`NULL` value are `NULL`.
+
+## Refused
+
+These words and constructs are not implemented. Each is refused when the statement is parsed or
+bound, with a message that names it, and never by returning a different answer. The reasons are in
+[ADR 0007](design/0007-scope.md).
+
+| Refused | Message or behaviour |
+| --- | --- |
+| `LEFT`, `RIGHT`, `FULL`, `OUTER`, `CROSS`, `NATURAL`, `USING` | `<word> is not supported` (only `[INNER] JOIN ... ON` and the comma join exist) |
+| `UNION`, `INTERSECT`, `EXCEPT`, `ALL`, `ANY` | `<word> is not supported` |
+| `DISTINCT`, `LIKE`, `ILIKE`, `CASE`, `WHEN`, `THEN`, `ELSE`, `END` | `<word> is not supported` |
+| `EXISTS`, `WITH`, `OVER`, `OFFSET` | `<word> is not supported` |
+| `/` | `division is not supported` (`AVG` is an aggregate) |
+| `SELECT *` | `SELECT * is not supported: list the columns` |
+| a subquery, or a parenthesised `FROM` item | `subqueries are not supported`, `subqueries and parenthesised FROM items are not supported` |
+| `GROUP BY 1`, `ORDER BY 1` | `GROUP BY ordinals are not supported: name the expression`, and the same for `ORDER BY` |
+| an `INTERVAL` anywhere but after a constant `DATE` | `INTERVAL arithmetic needs a constant DATE on the left` |
+| a cross product (comma join with no equality connecting a table) | `planner error ... requires a cross product between <a> and <b>` |
+| exponent notation (`1e5`) | `invalid numeric literal` |
+| a Parquet column of type `FLOAT`, `UINT64`, `TIMESTAMP`, `LIST` or `DECIMAL` with p > 38 | the table registers; naming the column is a binder error that gives its type and file |
 
 ## Names
 
