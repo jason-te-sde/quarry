@@ -77,6 +77,16 @@ class RenderTablesTest(unittest.TestCase):
         self.run_tables()
         self.assertIn("No result is committed", self.readme.read_text())
 
+    def test_a_crashed_cell_is_shown_like_a_timeout(self):
+        document = main_result(25.0)
+        document["cells"][0] = {
+            "engine": "quarry", "config": "default", "query": "q1", "dataset": "default", "group": "engines",
+            "status": "crashed", "error": "died", "load_flag": False,
+        }
+        self.result("main-20260101T000000Z.json", document)
+        self.assertEqual(self.run_tables(), 0)
+        self.assertIn("| Q1 | crashed |", self.readme.read_text())
+
     def test_an_unknown_table_is_an_error(self):
         self.readme.write_text("<!-- bench:nope -->\n<!-- /bench:nope -->\n")
         self.assertEqual(self.run_tables(), 1)

@@ -38,7 +38,7 @@ produces 12,093,991 rows where the plan estimated 15,000. It then joins `orders`
 million rows to probe with `lineitem` (`HashJoin #3`, 3,545 MiB of operator state, 73% of the
 operator time). 72% of the samples are in hash build, most of them in `quarry::KeyIndex::Find`
 (27%) and `quarry::KeyIndex::Insert` (16%) called from `JoinHashTable::Insert`, and the process
-peaks at 6.3 GiB (the memory table in [benchmarks.md](benchmarks.md)).
+peaks at 6,288 MiB (the memory table in [benchmarks.md](benchmarks.md)).
 
 The estimate is wrong because of how `EstimateJoinRows` in `src/planner/cardinality.cc` divides: it
 divides the product of the two input sizes by the row count of the first join key's base table, as if
@@ -66,7 +66,7 @@ and the string builder (`arrow::BaseBinaryBuilder::Append`) that materialises `l
 `Scan #2` is 98% of the operator time and 78% of the samples are the filter pushed into it:
 `eval_internal::EvalLogical` (27%), `CompareFixed` (20%), the copies around them (`_platform_memmove`
 14%, `memcpy` 6%) and `RepeatedArrayFactory::CreateBufferOf` (4%), Arrow's array-from-scalar helper, which the comparisons call for their literal operands. The query keeps 114,160 of 6,001,215 rows, so almost all the work is
-evaluating four comparisons and three `AND`s over rows that are then dropped. Row-group pruning
+evaluating the plan's filter (`bench/results/profile/explain-analyze-q6.txt`: four conjuncts, `BETWEEN` being one, joined by three `AND`s) over rows that are then dropped. Row-group pruning
 cannot help on the default file, because the dates are spread across every row group; on the
 `l_shipdate`-sorted file it can, and the pruning table shows both effects.
 

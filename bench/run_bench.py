@@ -329,10 +329,18 @@ def run_cell(spec, ctx):
             return cell_result
         done = subprocess.CompletedProcess(command, proc.returncode, "", stderr)
         if not out.exists():
-            raise RuntimeError(
-                f"{spec['engine']} {spec['config']} {spec['query']} wrote no timing (exit {done.returncode}): "
-                f"{done.stderr.strip()[-400:]}"
+            # The process died without writing its timing: a crash is the result of its cell.
+            code = done.returncode
+            how = f"killed by signal {-code}" if code < 0 else f"exit status {code}"
+            cell_result = {k: spec[k] for k in ("engine", "config", "query", "dataset", "group")}
+            cell_result.update(
+                {
+                    "status": "crashed",
+                    "error": f"the process died without writing a timing ({how}): {done.stderr.strip()[-400:]}",
+                    "load_flag": False,
+                }
             )
+            return cell_result
         raw = json.loads(out.read_text())
     cell_result = {k: spec[k] for k in ("engine", "config", "query", "dataset", "group")}
     cell_result.update(summarize(raw))

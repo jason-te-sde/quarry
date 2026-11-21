@@ -263,6 +263,25 @@ class RunBenchTest(unittest.TestCase):
             self.assertIn("cell limit", cell["error"])
             self.assertNotIn("median_ms", cell)
 
+    def test_a_crashed_cell_is_recorded_and_the_other_cells_are_kept(self):
+        wrapper = self.tools / "quarry-that-crashes-on-q5"
+        write_script(
+            wrapper,
+            "import os, signal, sys\n"
+            "if '--timing-json' in sys.argv and 'c_nationkey' in ' '.join(sys.argv):\n"
+            "    os.kill(os.getpid(), signal.SIGKILL)\n"
+            f"os.execv({str(QUARRY)!r}, [{str(QUARRY)!r}] + sys.argv[1:])\n",
+        )
+        done = self.run_bench(quarry=wrapper)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        cells = json.loads(self.results()[0].read_text())["cells"]
+        self.assertEqual(len(cells), 12)
+        crashed = [c for c in cells if c["status"] == "crashed"]
+        self.assertEqual([(c["engine"], c["query"]) for c in crashed], [("quarry", "q5")])
+        self.assertIn("signal 9", crashed[0]["error"])
+        self.assertNotIn("median_ms", crashed[0])
+        self.assertEqual(sum(c["status"] == "ok" for c in cells), 11)
+
 
 if __name__ == "__main__":
     unittest.main()

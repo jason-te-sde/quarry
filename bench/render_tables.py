@@ -61,7 +61,7 @@ def stat(c):
     if c is None:
         return "not run"
     if c["status"] != "ok":
-        return f"{c['status']}: {c['error']}" if c["status"] == "error" else "timeout"
+        return f"error: {c['error']}" if c["status"] == "error" else c["status"]
     return f"{ms(c['median_ms'])} ({ms(c['min_ms'])}-{ms(c['max_ms'])})"
 
 
@@ -147,6 +147,9 @@ def render_memory(root):
         quarry = pick(d["cells"], engine="quarry", query=q)
         one = pick(d["cells"], engine="duckdb", config="threads=1", query=q)
         many = pick(d["cells"], engine="duckdb", config="threads=default", query=q)
+        if any(c["status"] != "ok" for c in (quarry, one, many)):
+            rows.append([QUERY_LABEL[q]] + ["-"] * 6)
+            continue
         rows.append(
             [
                 QUERY_LABEL[q], mib(quarry["peak_rss_bytes"]), mib(quarry["pool_peak_bytes"]),
@@ -237,8 +240,8 @@ def render_spill(root):
             if c is None:
                 continue
             if c["status"] != "ok":
-                result = c["error"] if c["status"] == "error" else "timeout"
-                rows.append([QUERY_LABEL[q], b, f"refused: {result}" if c["status"] == "error" else result, "-", "-", "-"])
+                shown = f"refused: {c['error']}" if c["status"] == "error" else c["status"]
+                rows.append([QUERY_LABEL[q], b, shown, "-", "-", "-"])
             else:
                 rows.append(
                     [QUERY_LABEL[q], b, stat(c), mib(c["spilled_bytes"]), mib(c["pool_peak_bytes"]), mib(c["peak_rss_bytes"])]
