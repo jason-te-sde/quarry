@@ -249,7 +249,11 @@ arrow::Result<bool> ScanOperator::LoadNextRowGroup() {
         ARROW_ASSIGN_OR_RAISE(auto input, arrow::io::ReadableFile::Open(file.path.string()));
         ARROW_ASSIGN_OR_RAISE(file.reader, parquet::arrow::OpenFile(input, ScanPool()));
       }
-      ARROW_ASSIGN_OR_RAISE(table, file.reader->ReadRowGroup(group, file.file_columns));
+      auto read = file.reader->ReadRowGroup(group, file.file_columns);
+      if (!read.ok()) {
+        return read.status().WithMessage(file.path.string() + ": " + read.status().message());
+      }
+      table = std::move(*read);
     } catch (const parquet::ParquetStatusException& e) {
       return e.status().WithMessage(file.path.string() + ": " + e.status().message());
     } catch (const parquet::ParquetException& e) {

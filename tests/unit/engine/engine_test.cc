@@ -4,6 +4,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
@@ -461,6 +463,96 @@ TEST_F(SelectiveScanTest, ACancelFromAnotherThreadEndsAScanThatMatchesNothing) {
   const auto latency =
       std::chrono::duration_cast<std::chrono::milliseconds>(finished - cancelled_at);
   EXPECT_LT(latency.count(), 100) << "cancel took " << latency.count() << " ms";
+}
+
+// Malformed Parquet files are errors that name the file, never a crash. The reader reports a bad
+// footer or page by throwing; the engine turns each into a Status where it can occur.
+class MalformedParquetTest : public ::testing::Test {
+ protected:
+  std::filesystem::path Good() {
+    std::vector<int64_t> ids;
+    for (int64_t i = 0; i < 5000; ++i) ids.push_back(i * 7919 % 10007);
+    return WriteParquet(dir_.path() / "good.parquet", {Int64Column("id", ids)});
+  }
+
+  static std::string ReadAll(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  }
+
+  std::filesystem::path Write(const std::string& name, const std::string& bytes) {
+    const auto path = dir_.path() / name;
+    std::ofstream out(path, std::ios::binary);
+    out << bytes;
+    return path;
+  }
+
+  TempDir dir_;
+};
+
+TEST_F(MalformedParquetTest, RandomBytesAreRefusedWithTheFileName) {
+  std::string noise(4096, '\0');
+  unsigned state = 12345;
+  for (char& c : noise) {
+    state = state * 1664525u + 1013904223u;
+    c = static_cast<char>(state >> 24);
+  }
+  const auto file = Write("noise.parquet", noise);
+  Engine engine{EngineOptions{}};
+  const arrow::Status status = engine.RegisterTable("t", {file});
+  ASSERT_FALSE(status.ok());
+  EXPECT_NE(status.message().find("noise.parquet"), std::string::npos) << status.message();
+}
+
+TEST_F(MalformedParquetTest, ATruncatedFileIsRefusedWithTheFileName) {
+  const std::string bytes = ReadAll(Good());
+  const auto file = Write("truncated.parquet", bytes.substr(0, bytes.size() / 2));
+  Engine engine{EngineOptions{}};
+  const arrow::Status status = engine.RegisterTable("t", {file});
+  ASSERT_FALSE(status.ok());
+  EXPECT_NE(status.message().find("truncated.parquet"), std::string::npos) << status.message();
+}
+
+TEST_F(MalformedParquetTest, ACorruptDataPageIsAQueryErrorNotACrash) {
+  std::string bytes = ReadAll(Good());
+  // The footer is intact; the bytes after the magic number are the first data page.
+  for (size_t i = 4; i < 4 + 256 && i < bytes.size(); ++i) bytes[i] = static_cast<char>(0xFF);
+  const auto file = Write("page.parquet", bytes);
+  Engine engine{EngineOptions{}};
+  ASSERT_TRUE(engine.RegisterTable("t", {file}).ok());
+  auto result = engine.Execute("SELECT SUM(id) FROM t");
+  ASSERT_FALSE(result.ok()) << "the corrupt page was read as data";
+  EXPECT_NE(result.status().message().find("page.parquet"), std::string::npos)
+      << result.status().message();
+}
+
+// Values worked out by hand from the rows below, not taken from another engine: a filter, a join,
+// an aggregate with all three of SUM, AVG and COUNT, and the order of the result.
+TEST(EngineTest, ResultsWorkedOutByHandAgree) {
+  TempDir dir;
+  // orders: (id, customer, amount)
+  const auto orders = WriteParquet(dir.path() / "orders.parquet",
+                                   {Int64Column("id", {1, 2, 3, 4, 5, 6}),
+                                    Int64Column("customer", {10, 10, 20, 20, 20, 30}),
+                                    Int64Column("amount", {5, 7, 1, 2, 3, 100})});
+  const auto customers = WriteParquet(dir.path() / "customers.parquet",
+                                      {Int64Column("customer", {10, 20, 40}),
+                                       StringColumn("name", {"ann", "bob", "cy"})});
+  Engine engine{EngineOptions{}};
+  ASSERT_TRUE(engine.RegisterTable("orders", {orders}).ok());
+  ASSERT_TRUE(engine.RegisterTable("customers", {customers}).ok());
+  // Orders under 3 are dropped first (ids 3 and 4). Customer 30 has no row in customers and cy has
+  // no orders, so neither appears. ann: 5 + 7 = 12 over 2 orders, mean 6. bob: only the order of 3,
+  // so 3 over 1, mean 3. Largest total first.
+  auto result = engine.Execute(
+      "SELECT c.name, SUM(o.amount) AS total, COUNT(*) AS n, AVG(o.amount) AS mean "
+      "FROM orders o JOIN customers c ON o.customer = c.customer "
+      "WHERE o.amount >= 3 GROUP BY c.name ORDER BY total DESC");
+  ASSERT_TRUE(result.ok()) << result.status().ToString();
+  const arrow::Table& table = *result->table;
+  ASSERT_EQ(table.num_rows(), 2);
+  EXPECT_EQ(Row(table, 0), (std::vector<std::string>{"ann", "12", "2", "6"}));
+  EXPECT_EQ(Row(table, 1), (std::vector<std::string>{"bob", "3", "1", "3"}));
 }
 
 }  // namespace
