@@ -31,6 +31,7 @@ class HashJoinOperator final : public Operator {
     reservation_ =
         std::make_unique<Reservation>(*context.budget, ReservationOwner("HashJoin", node_.id));
     charged_ = std::make_unique<ChargedBytes>(reservation_.get());
+    table_ = JoinHashTable({}, context.pool);
     ARROW_RETURN_NOT_OK(probe_->Open(context));
     return build_->Open(context);
   }
@@ -119,7 +120,23 @@ class HashJoinOperator final : public Operator {
       key_slice.reserve(keys.size());
       for (const auto& key : keys) key_slice.push_back(key->Slice(offset, length));
       Batch slice = SliceBatch(batch, offset, length);
-      ARROW_RETURN_NOT_OK(table_.Insert(key_slice, length));
+      // The table's growth is charged before it is allocated: a rehash holds the old slot array
+      // and the new one at once. When the budget refuses, the table is left as it was and this
+      // slice and the rest of the batch go to the partition files.
+      int64_t refused = 0;
+      const auto charge = [&](int64_t growth) {
+        const int64_t needed = payload_bytes_ + table_.memory_bytes() + growth;
+        if (charged_->TrySet(needed)) return true;
+        refused = needed;
+        return false;
+      };
+      ARROW_ASSIGN_OR_RAISE(const bool inserted, table_.Insert(key_slice, length, charge));
+      if (!inserted) {
+        if (context_->spill == nullptr) return charged_->Set(refused);
+        ARROW_RETURN_NOT_OK(StartSinking(refused));
+        return SinkBuildRows(SliceBatch(batch, offset, batch.length - offset),
+                             SliceKeys(keys, offset, batch.length - offset));
+      }
       payload_bytes_ += BatchBytes(slice);
       build_parts_.push_back(std::move(slice));
       const int64_t needed = payload_bytes_ + table_.memory_bytes();
@@ -129,12 +146,18 @@ class HashJoinOperator final : public Operator {
       ARROW_RETURN_NOT_OK(StartSinking(needed));
       const int64_t rest = offset + length;
       if (rest >= batch.length) return arrow::Status::OK();
-      std::vector<std::shared_ptr<arrow::Array>> rest_keys;
-      rest_keys.reserve(keys.size());
-      for (const auto& key : keys) rest_keys.push_back(key->Slice(rest, batch.length - rest));
-      return SinkBuildRows(SliceBatch(batch, rest, batch.length - rest), rest_keys);
+      return SinkBuildRows(SliceBatch(batch, rest, batch.length - rest),
+                           SliceKeys(keys, rest, batch.length - rest));
     }
     return arrow::Status::OK();
+  }
+
+  static std::vector<std::shared_ptr<arrow::Array>> SliceKeys(
+      const std::vector<std::shared_ptr<arrow::Array>>& keys, int64_t offset, int64_t length) {
+    std::vector<std::shared_ptr<arrow::Array>> out;
+    out.reserve(keys.size());
+    for (const auto& key : keys) out.push_back(key->Slice(offset, length));
+    return out;
   }
 
   // Turns the table into partition files: writes the build rows held so far (at the depth of the
@@ -270,7 +293,7 @@ class HashJoinOperator final : public Operator {
   }
 
   void ResetTable() {
-    table_ = JoinHashTable();
+    table_ = JoinHashTable({}, context_->pool);
     build_parts_.clear();
     build_columns_.clear();
     payload_bytes_ = 0;

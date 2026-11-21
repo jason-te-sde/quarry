@@ -4,15 +4,34 @@
 
 namespace quarry {
 
-JoinHashTable::JoinHashTable(KeyHasher hasher) : index_(std::move(hasher)) {}
+JoinHashTable::JoinHashTable(KeyHasher hasher, arrow::MemoryPool* pool)
+    : index_(std::move(hasher), pool),
+      head_(MakePoolVector<uint32_t>(pool)),
+      tail_(MakePoolVector<uint32_t>(pool)),
+      next_(MakePoolVector<uint32_t>(pool)) {}
 
-arrow::Status JoinHashTable::Insert(const std::vector<std::shared_ptr<arrow::Array>>& keys,
-                                    int64_t n) {
+arrow::Result<bool> JoinHashTable::Insert(const std::vector<std::shared_ptr<arrow::Array>>& keys,
+                                          int64_t n, const ChargeFn& charge) {
   if (rows() + n >= static_cast<int64_t>(kNoRow)) {
     return arrow::Status::Invalid("a hash join build side is limited to ", kNoRow - 1, " rows");
   }
   EncodedKeys encoded;
   ARROW_RETURN_NOT_OK(EncodeKeys(keys, n, &encoded));
+  // Every row is a new key in the worst case. All the storage that takes is allocated here, once,
+  // after the budget has agreed to it.
+  const auto rows_in = static_cast<size_t>(n);
+  const auto key_bytes = static_cast<int64_t>(encoded.bytes.size());
+  const size_t distinct = head_.size() + rows_in;
+  if (charge) {
+    const int64_t growth = index_.GrowthBytes(n, key_bytes) + quarry::GrowthBytes(head_, distinct) +
+                           quarry::GrowthBytes(tail_, distinct) +
+                           quarry::GrowthBytes(next_, next_.size() + rows_in);
+    if (growth > 0 && !charge(growth)) return false;
+  }
+  index_.Reserve(n, key_bytes);
+  ReserveFor(head_, distinct);
+  ReserveFor(tail_, distinct);
+  ReserveFor(next_, next_.size() + rows_in);
   for (int64_t i = 0; i < n; ++i) {
     const auto row = static_cast<uint32_t>(next_.size());
     next_.push_back(kNoRow);
@@ -31,7 +50,7 @@ arrow::Status JoinHashTable::Insert(const std::vector<std::shared_ptr<arrow::Arr
       tail_[static_cast<size_t>(id)] = row;
     }
   }
-  return arrow::Status::OK();
+  return true;
 }
 
 arrow::Status JoinHashTable::Lookup(const std::vector<std::shared_ptr<arrow::Array>>& keys,

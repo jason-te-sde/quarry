@@ -4,7 +4,9 @@
 #include <arrow/status.h>
 #include <arrow/util/bit_util.h>
 
+#include <algorithm>
 #include <cstring>
+#include <span>
 #include <string>
 
 #include "exec/key_encoding.h"
@@ -25,9 +27,17 @@ using eval_internal::ValueBytes;
 // The state of one aggregate for every group, in group-id order.
 class AggregateState {
  public:
+  explicit AggregateState(arrow::MemoryPool* pool) : pool_(pool) {}
   virtual ~AggregateState() = default;
   // Makes room for groups [0, groups).
   virtual void Resize(int64_t groups) = 0;
+  // The bytes of new storage Resize(groups) would allocate, on top of memory_bytes(): while a
+  // vector is copied into a larger one, both exist.
+  virtual int64_t GrowthBytes(int64_t groups) const = 0;
+  // Reserves storage for `groups` groups without changing the number of groups, and the number of
+  // groups the storage holds without growing.
+  virtual void Reserve(int64_t groups) = 0;
+  virtual int64_t Capacity() const = 0;
   // Folds in row i of `arg` (null for COUNT(*)) into group group_ids[i], for i in [0, n).
   virtual arrow::Status Update(const uint32_t* group_ids, const arrow::Array* arg, int64_t n) = 0;
   virtual arrow::Result<ArrayPtr> Finish(int64_t first, int64_t count,
@@ -41,6 +51,15 @@ class AggregateState {
                                                              arrow::MemoryPool* pool) const = 0;
   virtual arrow::Status Merge(const uint32_t* group_ids,
                               const std::vector<const arrow::Array*>& partial, int64_t n) = 0;
+
+ protected:
+  // The per-group vectors come from the query's pool, so that the pool measures them.
+  template <typename T>
+  PoolVector<T> Vec() const {
+    return MakePoolVector<T>(pool_);
+  }
+
+  arrow::MemoryPool* pool_;
 };
 
 namespace {
@@ -50,23 +69,29 @@ const std::shared_ptr<arrow::DataType>& Int128Partial() {
   return type;
 }
 
-// An array of fixed-width values, with a validity bitmap built from `valid` (1 = a value).
+// An array of `count` fixed-width values, with a validity bitmap built from `valid` (1 = a value;
+// null means every value is valid).
 template <typename T>
 arrow::Result<ArrayPtr> MakeFixedArray(const std::shared_ptr<arrow::DataType>& type,
-                                       const std::vector<T>& values,
-                                       const std::vector<uint8_t>& valid, int64_t first,
+                                       std::span<const T> values, const uint8_t* valid,
                                        int64_t count, arrow::MemoryPool* pool) {
   ARROW_ASSIGN_OR_RAISE(auto data, eval_internal::AllocateValues<T>(count, pool));
   ARROW_ASSIGN_OR_RAISE(auto validity, arrow::AllocateEmptyBitmap(count, pool));
   for (int64_t i = 0; i < count; ++i) {
-    const auto at = static_cast<size_t>(first + i);
-    if (valid[at] != 0) {
+    const auto at = static_cast<size_t>(i);
+    if (valid == nullptr || valid[at] != 0) {
       arrow::bit_util::SetBit(validity->mutable_data(), i);
-      std::memcpy(data->mutable_data() + static_cast<size_t>(i) * sizeof(T), &values[at],
-                  sizeof(T));
+      std::memcpy(data->mutable_data() + at * sizeof(T), &values[at], sizeof(T));
     }
   }
   return FinishArray(type, count, std::move(validity), std::move(data));
+}
+
+// Groups [first, first + count) of a per-group vector.
+template <typename V>
+std::span<const typename V::value_type> Part(const V& values, int64_t first, int64_t count) {
+  return std::span<const typename V::value_type>(values.data() + first,
+                                                  static_cast<size_t>(count));
 }
 
 const uint8_t* ValidBits(const arrow::Array& array) {
@@ -79,8 +104,17 @@ bool IsValid(const uint8_t* valid, const arrow::Array& array, int64_t i) {
 
 class CountState final : public AggregateState {
  public:
-  explicit CountState(bool star) : star_(star) {}
-  void Resize(int64_t groups) override { counts_.resize(static_cast<size_t>(groups), 0); }
+  CountState(bool star, arrow::MemoryPool* pool) : AggregateState(pool), star_(star) {}
+  void Resize(int64_t groups) override { ResizeFor<int64_t>(counts_, static_cast<size_t>(groups), 0); }
+  int64_t GrowthBytes(int64_t groups) const override {
+    return quarry::GrowthBytes(counts_, static_cast<size_t>(groups));
+  }
+  void Reserve(int64_t groups) override {
+    ReserveFor(counts_, static_cast<size_t>(groups));
+  }
+  int64_t Capacity() const override {
+    return static_cast<int64_t>(std::min({counts_.capacity()}));
+  }
   arrow::Status Update(const uint32_t* group_ids, const arrow::Array* arg, int64_t n) override {
     if (star_ || arg == nullptr) {
       for (int64_t i = 0; i < n; ++i) ++counts_[group_ids[i]];
@@ -94,8 +128,8 @@ class CountState final : public AggregateState {
   }
   arrow::Result<ArrayPtr> Finish(int64_t first, int64_t count,
                                  arrow::MemoryPool* pool) const override {
-    const std::vector<uint8_t> all(counts_.size(), 1);
-    return MakeFixedArray<int64_t>(arrow::int64(), counts_, all, first, count, pool);
+    return MakeFixedArray<int64_t>(arrow::int64(), Part(counts_, first, count), nullptr, count,
+                                   pool);
   }
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(counts_.capacity() * sizeof(int64_t));
@@ -119,7 +153,7 @@ class CountState final : public AggregateState {
 
  private:
   bool star_;
-  std::vector<int64_t> counts_;
+  PoolVector<int64_t> counts_ = Vec<int64_t>();
 };
 
 // SUM of integers and DECIMALs: a 128-bit accumulator that must stay within 38 digits. T is the
@@ -127,10 +161,22 @@ class CountState final : public AggregateState {
 template <typename T>
 class SumState final : public AggregateState {
  public:
-  SumState(const LogicalType& result) : result_(result) {}
+  SumState(const LogicalType& result, arrow::MemoryPool* pool)
+      : AggregateState(pool), result_(result) {}
   void Resize(int64_t groups) override {
-    sums_.resize(static_cast<size_t>(groups), 0);
-    has_.resize(static_cast<size_t>(groups), 0);
+    ResizeFor<Int128>(sums_, static_cast<size_t>(groups), 0);
+    ResizeFor<uint8_t>(has_, static_cast<size_t>(groups), 0);
+  }
+  int64_t GrowthBytes(int64_t groups) const override {
+    return quarry::GrowthBytes(sums_, static_cast<size_t>(groups)) +
+           quarry::GrowthBytes(has_, static_cast<size_t>(groups));
+  }
+  void Reserve(int64_t groups) override {
+    ReserveFor(sums_, static_cast<size_t>(groups));
+    ReserveFor(has_, static_cast<size_t>(groups));
+  }
+  int64_t Capacity() const override {
+    return static_cast<int64_t>(std::min({sums_.capacity(), has_.capacity()}));
   }
   arrow::Status Update(const uint32_t* group_ids, const arrow::Array* arg, int64_t n) override {
     const uint8_t* values = ValueBytes(*arg);
@@ -152,7 +198,8 @@ class SumState final : public AggregateState {
   }
   arrow::Result<ArrayPtr> Finish(int64_t first, int64_t count,
                                  arrow::MemoryPool* pool) const override {
-    return MakeFixedArray<Int128>(result_.ToArrow(), sums_, has_, first, count, pool);
+    return MakeFixedArray<Int128>(result_.ToArrow(), Part(sums_, first, count),
+                                  has_.data() + first, count, pool);
   }
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(sums_.capacity() * sizeof(Int128) + has_.capacity());
@@ -187,15 +234,27 @@ class SumState final : public AggregateState {
 
  private:
   LogicalType result_;
-  std::vector<Int128> sums_;
-  std::vector<uint8_t> has_;
+  PoolVector<Int128> sums_ = Vec<Int128>();
+  PoolVector<uint8_t> has_ = Vec<uint8_t>();
 };
 
 class SumDoubleState final : public AggregateState {
  public:
+  explicit SumDoubleState(arrow::MemoryPool* pool) : AggregateState(pool) {}
   void Resize(int64_t groups) override {
-    sums_.resize(static_cast<size_t>(groups), 0.0);
-    has_.resize(static_cast<size_t>(groups), 0);
+    ResizeFor<double>(sums_, static_cast<size_t>(groups), 0.0);
+    ResizeFor<uint8_t>(has_, static_cast<size_t>(groups), 0);
+  }
+  int64_t GrowthBytes(int64_t groups) const override {
+    return quarry::GrowthBytes(sums_, static_cast<size_t>(groups)) +
+           quarry::GrowthBytes(has_, static_cast<size_t>(groups));
+  }
+  void Reserve(int64_t groups) override {
+    ReserveFor(sums_, static_cast<size_t>(groups));
+    ReserveFor(has_, static_cast<size_t>(groups));
+  }
+  int64_t Capacity() const override {
+    return static_cast<int64_t>(std::min({sums_.capacity(), has_.capacity()}));
   }
   arrow::Status Update(const uint32_t* group_ids, const arrow::Array* arg, int64_t n) override {
     const uint8_t* values = ValueBytes(*arg);
@@ -209,7 +268,8 @@ class SumDoubleState final : public AggregateState {
   }
   arrow::Result<ArrayPtr> Finish(int64_t first, int64_t count,
                                  arrow::MemoryPool* pool) const override {
-    return MakeFixedArray<double>(arrow::float64(), sums_, has_, first, count, pool);
+    return MakeFixedArray<double>(arrow::float64(), Part(sums_, first, count), has_.data() + first,
+                                  count, pool);
   }
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(sums_.capacity() * sizeof(double) + has_.capacity());
@@ -228,8 +288,8 @@ class SumDoubleState final : public AggregateState {
   }
 
  private:
-  std::vector<double> sums_;
-  std::vector<uint8_t> has_;
+  PoolVector<double> sums_ = Vec<double>();
+  PoolVector<uint8_t> has_ = Vec<uint8_t>();
 };
 
 // AVG of integers and DECIMALs: the exact sum and the count, divided once at the end as a DOUBLE.
@@ -237,10 +297,21 @@ class SumDoubleState final : public AggregateState {
 template <typename T>
 class AvgState final : public AggregateState {
  public:
-  explicit AvgState(int scale) : scale_(scale) {}
+  AvgState(int scale, arrow::MemoryPool* pool) : AggregateState(pool), scale_(scale) {}
   void Resize(int64_t groups) override {
-    sums_.resize(static_cast<size_t>(groups), 0);
-    counts_.resize(static_cast<size_t>(groups), 0);
+    ResizeFor<Int128>(sums_, static_cast<size_t>(groups), 0);
+    ResizeFor<int64_t>(counts_, static_cast<size_t>(groups), 0);
+  }
+  int64_t GrowthBytes(int64_t groups) const override {
+    return quarry::GrowthBytes(sums_, static_cast<size_t>(groups)) +
+           quarry::GrowthBytes(counts_, static_cast<size_t>(groups));
+  }
+  void Reserve(int64_t groups) override {
+    ReserveFor(sums_, static_cast<size_t>(groups));
+    ReserveFor(counts_, static_cast<size_t>(groups));
+  }
+  int64_t Capacity() const override {
+    return static_cast<int64_t>(std::min({sums_.capacity(), counts_.capacity()}));
   }
   arrow::Status Update(const uint32_t* group_ids, const arrow::Array* arg, int64_t n) override {
     const uint8_t* values = ValueBytes(*arg);
@@ -260,17 +331,23 @@ class AvgState final : public AggregateState {
   }
   arrow::Result<ArrayPtr> Finish(int64_t first, int64_t count,
                                  arrow::MemoryPool* pool) const override {
-    std::vector<double> averages(sums_.size(), 0.0);
-    std::vector<uint8_t> has(sums_.size(), 0);
+    // Only the groups asked for: a caller that hands the groups out in batches calls this once per
+    // batch, so work on every group here would make producing the output quadratic.
+    // From the pool the output comes from, so that what this call allocates is counted there.
+    PoolVector<double> averages(static_cast<size_t>(count), 0.0,
+                                arrow::stl::allocator<double>(pool));
+    PoolVector<uint8_t> has(static_cast<size_t>(count), 0, arrow::stl::allocator<uint8_t>(pool));
     const double divisor = static_cast<double>(PowerOfTen<Int128>(scale_));
-    for (size_t g = 0; g < sums_.size(); ++g) {
+    for (int64_t i = 0; i < count; ++i) {
+      const auto g = static_cast<size_t>(first + i);
       if (counts_[g] == 0) continue;
-      has[g] = 1;
+      has[static_cast<size_t>(i)] = 1;
       // The same order of operations as DuckDB, so that the last digit agrees: the sum as a
       // number first, then the mean.
-      averages[g] = static_cast<double>(sums_[g]) / divisor / static_cast<double>(counts_[g]);
+      averages[static_cast<size_t>(i)] =
+          static_cast<double>(sums_[g]) / divisor / static_cast<double>(counts_[g]);
     }
-    return MakeFixedArray<double>(arrow::float64(), averages, has, first, count, pool);
+    return MakeFixedArray<double>(arrow::float64(), averages, has.data(), count, pool);
   }
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(sums_.capacity() * sizeof(Int128) +
@@ -282,11 +359,12 @@ class AvgState final : public AggregateState {
   }
   arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
                                                      arrow::MemoryPool* pool) const override {
-    const std::vector<uint8_t> all(sums_.size(), 1);
-    ARROW_ASSIGN_OR_RAISE(auto sums,
-                          MakeFixedArray<Int128>(Int128Partial(), sums_, all, first, count, pool));
-    ARROW_ASSIGN_OR_RAISE(
-        auto counts, MakeFixedArray<int64_t>(arrow::int64(), counts_, all, first, count, pool));
+    ARROW_ASSIGN_OR_RAISE(auto sums, MakeFixedArray<Int128>(Int128Partial(),
+                                                            Part(sums_, first, count), nullptr,
+                                                            count, pool));
+    ARROW_ASSIGN_OR_RAISE(auto counts,
+                          MakeFixedArray<int64_t>(arrow::int64(), Part(counts_, first, count),
+                                                  nullptr, count, pool));
     return std::vector<ArrayPtr>{std::move(sums), std::move(counts)};
   }
   arrow::Status Merge(const uint32_t* group_ids, const std::vector<const arrow::Array*>& partial,
@@ -307,15 +385,27 @@ class AvgState final : public AggregateState {
 
  private:
   int scale_;
-  std::vector<Int128> sums_;
-  std::vector<int64_t> counts_;
+  PoolVector<Int128> sums_ = Vec<Int128>();
+  PoolVector<int64_t> counts_ = Vec<int64_t>();
 };
 
 class AvgDoubleState final : public AggregateState {
  public:
+  explicit AvgDoubleState(arrow::MemoryPool* pool) : AggregateState(pool) {}
   void Resize(int64_t groups) override {
-    sums_.resize(static_cast<size_t>(groups), 0.0);
-    counts_.resize(static_cast<size_t>(groups), 0);
+    ResizeFor<double>(sums_, static_cast<size_t>(groups), 0.0);
+    ResizeFor<int64_t>(counts_, static_cast<size_t>(groups), 0);
+  }
+  int64_t GrowthBytes(int64_t groups) const override {
+    return quarry::GrowthBytes(sums_, static_cast<size_t>(groups)) +
+           quarry::GrowthBytes(counts_, static_cast<size_t>(groups));
+  }
+  void Reserve(int64_t groups) override {
+    ReserveFor(sums_, static_cast<size_t>(groups));
+    ReserveFor(counts_, static_cast<size_t>(groups));
+  }
+  int64_t Capacity() const override {
+    return static_cast<int64_t>(std::min({sums_.capacity(), counts_.capacity()}));
   }
   arrow::Status Update(const uint32_t* group_ids, const arrow::Array* arg, int64_t n) override {
     const uint8_t* values = ValueBytes(*arg);
@@ -329,14 +419,17 @@ class AvgDoubleState final : public AggregateState {
   }
   arrow::Result<ArrayPtr> Finish(int64_t first, int64_t count,
                                  arrow::MemoryPool* pool) const override {
-    std::vector<double> averages(sums_.size(), 0.0);
-    std::vector<uint8_t> has(sums_.size(), 0);
-    for (size_t g = 0; g < sums_.size(); ++g) {
+    // From the pool the output comes from, so that what this call allocates is counted there.
+    PoolVector<double> averages(static_cast<size_t>(count), 0.0,
+                                arrow::stl::allocator<double>(pool));
+    PoolVector<uint8_t> has(static_cast<size_t>(count), 0, arrow::stl::allocator<uint8_t>(pool));
+    for (int64_t i = 0; i < count; ++i) {
+      const auto g = static_cast<size_t>(first + i);
       if (counts_[g] == 0) continue;
-      has[g] = 1;
-      averages[g] = sums_[g] / static_cast<double>(counts_[g]);
+      has[static_cast<size_t>(i)] = 1;
+      averages[static_cast<size_t>(i)] = sums_[g] / static_cast<double>(counts_[g]);
     }
-    return MakeFixedArray<double>(arrow::float64(), averages, has, first, count, pool);
+    return MakeFixedArray<double>(arrow::float64(), averages, has.data(), count, pool);
   }
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(sums_.capacity() * sizeof(double) +
@@ -347,11 +440,12 @@ class AvgDoubleState final : public AggregateState {
   }
   arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
                                                      arrow::MemoryPool* pool) const override {
-    const std::vector<uint8_t> all(sums_.size(), 1);
     ARROW_ASSIGN_OR_RAISE(auto sums,
-                          MakeFixedArray<double>(arrow::float64(), sums_, all, first, count, pool));
-    ARROW_ASSIGN_OR_RAISE(
-        auto counts, MakeFixedArray<int64_t>(arrow::int64(), counts_, all, first, count, pool));
+                          MakeFixedArray<double>(arrow::float64(), Part(sums_, first, count),
+                                                 nullptr, count, pool));
+    ARROW_ASSIGN_OR_RAISE(auto counts,
+                          MakeFixedArray<int64_t>(arrow::int64(), Part(counts_, first, count),
+                                                  nullptr, count, pool));
     return std::vector<ArrayPtr>{std::move(sums), std::move(counts)};
   }
   arrow::Status Merge(const uint32_t* group_ids, const std::vector<const arrow::Array*>& partial,
@@ -366,18 +460,30 @@ class AvgDoubleState final : public AggregateState {
   }
 
  private:
-  std::vector<double> sums_;
-  std::vector<int64_t> counts_;
+  PoolVector<double> sums_ = Vec<double>();
+  PoolVector<int64_t> counts_ = Vec<int64_t>();
 };
 
 // MIN and MAX of a fixed-width type. T is the stored value type.
 template <typename T, bool kMax>
 class MinMaxState final : public AggregateState {
  public:
-  explicit MinMaxState(std::shared_ptr<arrow::DataType> type) : type_(std::move(type)) {}
+  MinMaxState(std::shared_ptr<arrow::DataType> type, arrow::MemoryPool* pool)
+      : AggregateState(pool), type_(std::move(type)) {}
   void Resize(int64_t groups) override {
-    values_.resize(static_cast<size_t>(groups), T{});
-    has_.resize(static_cast<size_t>(groups), 0);
+    ResizeFor<T>(values_, static_cast<size_t>(groups), T{});
+    ResizeFor<uint8_t>(has_, static_cast<size_t>(groups), 0);
+  }
+  int64_t GrowthBytes(int64_t groups) const override {
+    return quarry::GrowthBytes(values_, static_cast<size_t>(groups)) +
+           quarry::GrowthBytes(has_, static_cast<size_t>(groups));
+  }
+  void Reserve(int64_t groups) override {
+    ReserveFor(values_, static_cast<size_t>(groups));
+    ReserveFor(has_, static_cast<size_t>(groups));
+  }
+  int64_t Capacity() const override {
+    return static_cast<int64_t>(std::min({values_.capacity(), has_.capacity()}));
   }
   arrow::Status Update(const uint32_t* group_ids, const arrow::Array* arg, int64_t n) override {
     const uint8_t* values = ValueBytes(*arg);
@@ -395,7 +501,7 @@ class MinMaxState final : public AggregateState {
   }
   arrow::Result<ArrayPtr> Finish(int64_t first, int64_t count,
                                  arrow::MemoryPool* pool) const override {
-    return MakeFixedArray<T>(type_, values_, has_, first, count, pool);
+    return MakeFixedArray<T>(type_, Part(values_, first, count), has_.data() + first, count, pool);
   }
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(values_.capacity() * sizeof(T) + has_.capacity());
@@ -413,16 +519,28 @@ class MinMaxState final : public AggregateState {
 
  private:
   std::shared_ptr<arrow::DataType> type_;
-  std::vector<T> values_;
-  std::vector<uint8_t> has_;
+  PoolVector<T> values_ = Vec<T>();
+  PoolVector<uint8_t> has_ = Vec<uint8_t>();
 };
 
 template <bool kMax>
 class MinMaxBoolState final : public AggregateState {
  public:
+  explicit MinMaxBoolState(arrow::MemoryPool* pool) : AggregateState(pool) {}
   void Resize(int64_t groups) override {
-    values_.resize(static_cast<size_t>(groups), 0);
-    has_.resize(static_cast<size_t>(groups), 0);
+    ResizeFor<uint8_t>(values_, static_cast<size_t>(groups), 0);
+    ResizeFor<uint8_t>(has_, static_cast<size_t>(groups), 0);
+  }
+  int64_t GrowthBytes(int64_t groups) const override {
+    return quarry::GrowthBytes(values_, static_cast<size_t>(groups)) +
+           quarry::GrowthBytes(has_, static_cast<size_t>(groups));
+  }
+  void Reserve(int64_t groups) override {
+    ReserveFor(values_, static_cast<size_t>(groups));
+    ReserveFor(has_, static_cast<size_t>(groups));
+  }
+  int64_t Capacity() const override {
+    return static_cast<int64_t>(std::min({values_.capacity(), has_.capacity()}));
   }
   arrow::Status Update(const uint32_t* group_ids, const arrow::Array* arg, int64_t n) override {
     const uint8_t* bits = ValueBytes(*arg);
@@ -467,16 +585,28 @@ class MinMaxBoolState final : public AggregateState {
   }
 
  private:
-  std::vector<uint8_t> values_;
-  std::vector<uint8_t> has_;
+  PoolVector<uint8_t> values_ = Vec<uint8_t>();
+  PoolVector<uint8_t> has_ = Vec<uint8_t>();
 };
 
 template <bool kMax>
 class MinMaxStringState final : public AggregateState {
  public:
+  explicit MinMaxStringState(arrow::MemoryPool* pool) : AggregateState(pool) {}
   void Resize(int64_t groups) override {
-    values_.resize(static_cast<size_t>(groups));
-    has_.resize(static_cast<size_t>(groups), 0);
+    ResizeFor<std::string>(values_, static_cast<size_t>(groups), std::string());
+    ResizeFor<uint8_t>(has_, static_cast<size_t>(groups), 0);
+  }
+  int64_t GrowthBytes(int64_t groups) const override {
+    return quarry::GrowthBytes(values_, static_cast<size_t>(groups)) +
+           quarry::GrowthBytes(has_, static_cast<size_t>(groups));
+  }
+  void Reserve(int64_t groups) override {
+    ReserveFor(values_, static_cast<size_t>(groups));
+    ReserveFor(has_, static_cast<size_t>(groups));
+  }
+  int64_t Capacity() const override {
+    return static_cast<int64_t>(std::min({values_.capacity(), has_.capacity()}));
   }
   arrow::Status Update(const uint32_t* group_ids, const arrow::Array* arg, int64_t n) override {
     const auto& strings = static_cast<const arrow::StringArray&>(*arg);
@@ -526,83 +656,87 @@ class MinMaxStringState final : public AggregateState {
   }
 
  private:
-  std::vector<std::string> values_;
-  std::vector<uint8_t> has_;
+  // The vector of strings is in the pool; the bytes of the strings themselves are not (they are
+  // charged, in bytes_).
+  PoolVector<std::string> values_ = Vec<std::string>();
+  PoolVector<uint8_t> has_ = Vec<uint8_t>();
   int64_t bytes_ = 0;
 };
 
 template <bool kMax>
-arrow::Result<std::unique_ptr<AggregateState>> MakeMinMax(const LogicalType& type) {
+arrow::Result<std::unique_ptr<AggregateState>> MakeMinMax(const LogicalType& type,
+                                                          arrow::MemoryPool* pool) {
   const auto arrow_type = type.ToArrow();
   switch (type.id) {
     case TypeId::kBoolean:
-      return std::unique_ptr<AggregateState>(std::make_unique<MinMaxBoolState<kMax>>());
+      return std::unique_ptr<AggregateState>(std::make_unique<MinMaxBoolState<kMax>>(pool));
     case TypeId::kInt32:
     case TypeId::kDate:
       return std::unique_ptr<AggregateState>(
-          std::make_unique<MinMaxState<int32_t, kMax>>(arrow_type));
+          std::make_unique<MinMaxState<int32_t, kMax>>(arrow_type, pool));
     case TypeId::kInt64:
       return std::unique_ptr<AggregateState>(
-          std::make_unique<MinMaxState<int64_t, kMax>>(arrow_type));
+          std::make_unique<MinMaxState<int64_t, kMax>>(arrow_type, pool));
     case TypeId::kDecimal:
       if (type.is_decimal64()) {
         return std::unique_ptr<AggregateState>(
-            std::make_unique<MinMaxState<int64_t, kMax>>(arrow_type));
+            std::make_unique<MinMaxState<int64_t, kMax>>(arrow_type, pool));
       }
       return std::unique_ptr<AggregateState>(
-          std::make_unique<MinMaxState<Int128, kMax>>(arrow_type));
+          std::make_unique<MinMaxState<Int128, kMax>>(arrow_type, pool));
     case TypeId::kDouble:
       return std::unique_ptr<AggregateState>(
-          std::make_unique<MinMaxState<double, kMax>>(arrow_type));
+          std::make_unique<MinMaxState<double, kMax>>(arrow_type, pool));
     case TypeId::kVarchar:
-      return std::unique_ptr<AggregateState>(std::make_unique<MinMaxStringState<kMax>>());
+      return std::unique_ptr<AggregateState>(std::make_unique<MinMaxStringState<kMax>>(pool));
   }
   return arrow::Status::Invalid("MIN/MAX of ", type.ToString(), " is not supported");
 }
 
-arrow::Result<std::unique_ptr<AggregateState>> MakeState(const AggSpec& spec) {
+arrow::Result<std::unique_ptr<AggregateState>> MakeState(const AggSpec& spec,
+                                                         arrow::MemoryPool* pool) {
   const LogicalType& arg = spec.arg_type;
   switch (spec.func) {
     case AggFunc::kCountStar:
-      return std::unique_ptr<AggregateState>(std::make_unique<CountState>(true));
+      return std::unique_ptr<AggregateState>(std::make_unique<CountState>(true, pool));
     case AggFunc::kCount:
-      return std::unique_ptr<AggregateState>(std::make_unique<CountState>(false));
+      return std::unique_ptr<AggregateState>(std::make_unique<CountState>(false, pool));
     case AggFunc::kMin:
-      return MakeMinMax<false>(arg);
+      return MakeMinMax<false>(arg, pool);
     case AggFunc::kMax:
-      return MakeMinMax<true>(arg);
+      return MakeMinMax<true>(arg, pool);
     case AggFunc::kSum:
       if (arg.id == TypeId::kInt32) {
         return std::unique_ptr<AggregateState>(
-            std::make_unique<SumState<int32_t>>(spec.result_type));
+            std::make_unique<SumState<int32_t>>(spec.result_type, pool));
       }
       if (arg.id == TypeId::kInt64 || arg.is_decimal64()) {
         return std::unique_ptr<AggregateState>(
-            std::make_unique<SumState<int64_t>>(spec.result_type));
+            std::make_unique<SumState<int64_t>>(spec.result_type, pool));
       }
       if (arg.is_decimal()) {
         return std::unique_ptr<AggregateState>(
-            std::make_unique<SumState<Int128>>(spec.result_type));
+            std::make_unique<SumState<Int128>>(spec.result_type, pool));
       }
       if (arg.id == TypeId::kDouble) {
-        return std::unique_ptr<AggregateState>(std::make_unique<SumDoubleState>());
+        return std::unique_ptr<AggregateState>(std::make_unique<SumDoubleState>(pool));
       }
       break;
     case AggFunc::kAvg:
       if (arg.id == TypeId::kInt32) {
-        return std::unique_ptr<AggregateState>(std::make_unique<AvgState<int32_t>>(0));
+        return std::unique_ptr<AggregateState>(std::make_unique<AvgState<int32_t>>(0, pool));
       }
       if (arg.id == TypeId::kInt64) {
-        return std::unique_ptr<AggregateState>(std::make_unique<AvgState<int64_t>>(0));
+        return std::unique_ptr<AggregateState>(std::make_unique<AvgState<int64_t>>(0, pool));
       }
       if (arg.is_decimal64()) {
-        return std::unique_ptr<AggregateState>(std::make_unique<AvgState<int64_t>>(arg.scale));
+        return std::unique_ptr<AggregateState>(std::make_unique<AvgState<int64_t>>(arg.scale, pool));
       }
       if (arg.is_decimal()) {
-        return std::unique_ptr<AggregateState>(std::make_unique<AvgState<Int128>>(arg.scale));
+        return std::unique_ptr<AggregateState>(std::make_unique<AvgState<Int128>>(arg.scale, pool));
       }
       if (arg.id == TypeId::kDouble) {
-        return std::unique_ptr<AggregateState>(std::make_unique<AvgDoubleState>());
+        return std::unique_ptr<AggregateState>(std::make_unique<AvgDoubleState>(pool));
       }
       break;
   }
@@ -613,19 +747,20 @@ arrow::Result<std::unique_ptr<AggregateState>> MakeState(const AggSpec& spec) {
 }  // namespace
 
 AggHashTable::AggHashTable(std::vector<LogicalType> key_types, std::vector<AggSpec> aggregates,
-                           Reservation* reservation, KeyHasher hasher)
+                           Reservation* reservation, KeyHasher hasher, arrow::MemoryPool* pool)
     : key_types_(std::move(key_types)),
       specs_(std::move(aggregates)),
       reservation_(reservation),
       hasher_(hasher),
-      index_(std::move(hasher)) {
+      pool_(pool),
+      index_(std::move(hasher), pool) {
   MakeStates();
 }
 
 void AggHashTable::MakeStates() {
   states_.clear();
   for (const AggSpec& spec : specs_) {
-    auto state = MakeState(spec);
+    auto state = MakeState(spec, pool_);
     // A spec the binder accepted always has a state; a failure here is a programming error that
     // Update reports (states_ is shorter than specs_).
     if (state.ok()) states_.push_back(std::move(*state));
@@ -633,9 +768,10 @@ void AggHashTable::MakeStates() {
 }
 
 void AggHashTable::Clear() {
-  index_ = KeyIndex(hasher_);
+  index_ = KeyIndex(hasher_, pool_);
   MakeStates();
   groups_ = 0;
+  states_capacity_ = 0;
   over_budget_ = false;
   if (reservation_ != nullptr && charged_ > 0) reservation_->Shrink(charged_);
   charged_ = 0;
@@ -653,6 +789,8 @@ int64_t AggHashTable::memory_bytes() const {
   return bytes;
 }
 
+// Makes the reservation hold what the table holds now: more after a growth, less once a growth
+// has freed the storage it replaced.
 arrow::Status AggHashTable::Charge() {
   if (reservation_ == nullptr) return arrow::Status::OK();
   const int64_t now = memory_bytes();
@@ -666,12 +804,48 @@ arrow::Status AggHashTable::Charge() {
       ARROW_RETURN_NOT_OK(reservation_->Grow(now - charged_));
     }
     charged_ = now;
+  } else if (now < charged_) {
+    reservation_->Shrink(charged_ - now);
+    charged_ = now;
   }
   return arrow::Status::OK();
 }
 
-arrow::Status AggHashTable::FindGroups(const std::vector<std::shared_ptr<arrow::Array>>& keys,
-                                       int64_t n, std::vector<uint32_t>* group_ids) {
+// Makes room for one more group, and charges what that allocates before it does. False, with
+// nothing allocated, when a spillable table that has groups cannot pay: its caller spills it. An
+// empty table that cannot pay takes the group anyway (there is nothing to spill); Charge then
+// reports it over budget.
+arrow::Result<bool> AggHashTable::PayForGroup(int64_t key_bytes) {
+  const bool states_full = groups_ + 1 > states_capacity_;
+  int64_t growth = index_.GrowthBytes(1, key_bytes);
+  if (states_full) {
+    for (const auto& state : states_) growth += state->GrowthBytes(groups_ + 1);
+  }
+  if (growth > 0 && reservation_ != nullptr) {
+    if (!spillable_) {
+      ARROW_RETURN_NOT_OK(reservation_->Grow(growth));
+      charged_ += growth;
+    } else if (reservation_->TryGrow(growth)) {
+      charged_ += growth;
+    } else if (groups_ > 0) {
+      over_budget_ = true;
+      return false;
+    }
+  }
+  index_.Reserve(1, key_bytes);
+  if (states_full) {
+    int64_t capacity = INT64_MAX;
+    for (const auto& state : states_) {
+      state->Reserve(groups_ + 1);
+      capacity = std::min(capacity, state->Capacity());
+    }
+    states_capacity_ = capacity;
+  }
+  return true;
+}
+
+arrow::Result<bool> AggHashTable::FindGroups(const std::vector<std::shared_ptr<arrow::Array>>& keys,
+                                             int64_t n, std::vector<uint32_t>* group_ids) {
   if (states_.size() != specs_.size()) {
     return arrow::Status::Invalid("an aggregate of the plan has no implementation");
   }
@@ -692,6 +866,15 @@ arrow::Status AggHashTable::FindGroups(const std::vector<std::shared_ptr<arrow::
       const uint64_t hash = index_.Hash(key);
       int64_t id = index_.Find(key, hash);
       if (id == KeyIndex::kAbsent) {
+        // A new group may grow the key index, the arena, the offsets and every state vector, each
+        // while the old storage still exists. What that allocates is paid for first.
+        ARROW_ASSIGN_OR_RAISE(const bool paid, PayForGroup(static_cast<int64_t>(key.size())));
+        if (!paid) {
+          // Groups this call added before it stopped keep empty states (no row has been folded
+          // in); the retry finds them. Within the reserved capacity, so nothing is allocated.
+          for (const auto& state : states_) state->Resize(groups_);
+          return false;  // the table is over budget: spill it, then ask again
+        }
         id = index_.Insert(key, hash);
         ++groups_;
       }
@@ -702,24 +885,26 @@ arrow::Status AggHashTable::FindGroups(const std::vector<std::shared_ptr<arrow::
     return arrow::Status::Invalid("more than 2^32 groups");
   }
   for (const auto& state : states_) state->Resize(groups_);
-  return arrow::Status::OK();
+  return true;
 }
 
-arrow::Status AggHashTable::Update(const std::vector<std::shared_ptr<arrow::Array>>& keys,
-                                   const std::vector<std::shared_ptr<arrow::Array>>& args,
-                                   int64_t n) {
+arrow::Result<bool> AggHashTable::Update(const std::vector<std::shared_ptr<arrow::Array>>& keys,
+                                         const std::vector<std::shared_ptr<arrow::Array>>& args,
+                                         int64_t n) {
   if (args.size() != specs_.size()) {
     return arrow::Status::Invalid("aggregate update has ", args.size(), " arguments, expected ",
                                   specs_.size());
   }
   std::vector<uint32_t> group_ids;
-  ARROW_RETURN_NOT_OK(FindGroups(keys, n, &group_ids));
+  ARROW_ASSIGN_OR_RAISE(const bool found, FindGroups(keys, n, &group_ids));
+  if (!found) return false;
   if (n > 0) {
     for (size_t a = 0; a < states_.size(); ++a) {
       ARROW_RETURN_NOT_OK(states_[a]->Update(group_ids.data(), args[a].get(), n));
     }
   }
-  return Charge();
+  ARROW_RETURN_NOT_OK(Charge());
+  return true;
 }
 
 std::vector<std::shared_ptr<arrow::DataType>> AggHashTable::PartialTypes() const {
@@ -732,11 +917,12 @@ std::vector<std::shared_ptr<arrow::DataType>> AggHashTable::PartialTypes() const
   return types;
 }
 
-arrow::Status AggHashTable::MergePartial(const std::vector<std::shared_ptr<arrow::Array>>& keys,
-                                         const std::vector<std::shared_ptr<arrow::Array>>& partials,
-                                         int64_t n) {
+arrow::Result<bool> AggHashTable::MergePartial(
+    const std::vector<std::shared_ptr<arrow::Array>>& keys,
+    const std::vector<std::shared_ptr<arrow::Array>>& partials, int64_t n) {
   std::vector<uint32_t> group_ids;
-  ARROW_RETURN_NOT_OK(FindGroups(keys, n, &group_ids));
+  ARROW_ASSIGN_OR_RAISE(const bool found, FindGroups(keys, n, &group_ids));
+  if (!found) return false;
   size_t next = 0;
   for (const auto& state : states_) {
     const size_t width = state->PartialTypes().size();
@@ -751,7 +937,8 @@ arrow::Status AggHashTable::MergePartial(const std::vector<std::shared_ptr<arrow
   if (next != partials.size()) {
     return arrow::Status::Invalid("a spilled aggregate row has too many partial columns");
   }
-  return Charge();
+  ARROW_RETURN_NOT_OK(Charge());
+  return true;
 }
 
 arrow::Status AggHashTable::EnsureGlobalGroup() {

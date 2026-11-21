@@ -10,8 +10,14 @@ namespace {
 constexpr size_t kInitialSlots = 16;
 }  // namespace
 
-KeyIndex::KeyIndex(KeyHasher hasher)
-    : hasher_(std::move(hasher)), slots_(kInitialSlots), mask_(kInitialSlots - 1), offsets_{0} {}
+KeyIndex::KeyIndex(KeyHasher hasher, arrow::MemoryPool* pool)
+    : hasher_(std::move(hasher)),
+      slots_(kInitialSlots, Slot{}, arrow::stl::allocator<Slot>(pool)),
+      mask_(kInitialSlots - 1),
+      arena_(MakePoolVector<uint8_t>(pool)),
+      offsets_(MakePoolVector<uint64_t>(pool)) {
+  offsets_.push_back(0);
+}
 
 uint64_t KeyIndex::Hash(std::span<const uint8_t> key) const {
   const std::span<const std::byte> bytes(reinterpret_cast<const std::byte*>(key.data()),
@@ -47,10 +53,32 @@ int64_t KeyIndex::Find(std::span<const uint8_t> key, uint64_t hash) const {
   }
 }
 
+// The number of slots that keeps the table at most half full with `keys` keys in it.
+size_t KeyIndex::SlotsFor(int64_t keys) const {
+  size_t slots = slots_.size();
+  while (static_cast<size_t>(keys) * 2 > slots) slots *= 2;
+  return slots;
+}
+
+int64_t KeyIndex::GrowthBytes(int64_t keys, int64_t key_bytes) const {
+  int64_t bytes = 0;
+  const size_t slots = SlotsFor(size() + keys);
+  if (slots > slots_.size()) bytes += static_cast<int64_t>(slots * sizeof(Slot));
+  bytes += quarry::GrowthBytes(arena_, arena_.size() + static_cast<size_t>(key_bytes));
+  bytes += quarry::GrowthBytes(offsets_, offsets_.size() + static_cast<size_t>(keys));
+  return bytes;
+}
+
+void KeyIndex::Reserve(int64_t keys, int64_t key_bytes) {
+  const size_t slots = SlotsFor(size() + keys);
+  if (slots > slots_.size()) Rehash(slots);
+  ReserveFor(arena_, arena_.size() + static_cast<size_t>(key_bytes));
+  ReserveFor(offsets_, offsets_.size() + static_cast<size_t>(keys));
+}
+
 int64_t KeyIndex::Insert(std::span<const uint8_t> key, uint64_t hash) {
-  if ((static_cast<size_t>(size()) + 1) * 2 > slots_.size()) {
-    Grow();
-  }
+  // A caller that did not Reserve gets the same growth, one key at a time.
+  Reserve(1, static_cast<int64_t>(key.size()));
   const int64_t id = size();
   arena_.insert(arena_.end(), key.begin(), key.end());
   offsets_.push_back(arena_.size());
@@ -62,8 +90,8 @@ int64_t KeyIndex::Insert(std::span<const uint8_t> key, uint64_t hash) {
   return id;
 }
 
-void KeyIndex::Grow() {
-  std::vector<Slot> bigger(slots_.size() * 2);
+void KeyIndex::Rehash(size_t slots) {
+  PoolVector<Slot> bigger(slots, Slot{}, slots_.get_allocator());
   const size_t mask = bigger.size() - 1;
   for (const Slot& slot : slots_) {
     if (slot.id_plus_one == 0) continue;

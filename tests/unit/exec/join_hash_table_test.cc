@@ -168,5 +168,43 @@ TEST(JoinHashTableTest, DoubleZerosAreEqualKeys) {
   EXPECT_EQ(Matches(table, {negative_zero}, 1).at(0), (std::vector<uint32_t>{0}));
 }
 
+// A growth is announced before it is allocated: the table asks the charge function for the bytes of
+// new storage (a rehash holds the old slot array and the new one together), and a refusal leaves
+// the table exactly as it was.
+TEST(JoinHashTableTest, StorageIsChargedBeforeItIsAllocatedAndARefusalInsertsNothing) {
+  arrow::ProxyMemoryPool pool(arrow::default_memory_pool());
+  JoinHashTable table({}, &pool);
+  std::vector<int64_t> keys(5000);
+  for (size_t i = 0; i < keys.size(); ++i) keys[i] = static_cast<int64_t>(i);
+
+  int64_t requested = 0;
+  int64_t pool_at_request = -1;
+  const auto agree = [&](int64_t bytes) {
+    requested += bytes;
+    pool_at_request = pool.bytes_allocated();
+    return true;
+  };
+  const int64_t before_bytes = pool.bytes_allocated();
+  auto inserted = table.Insert({Ints(keys)}, 5000, agree);
+  ASSERT_TRUE(inserted.ok());
+  EXPECT_TRUE(*inserted);
+  EXPECT_GT(requested, 0);
+  EXPECT_EQ(pool_at_request, before_bytes) << "the charge came after the allocation";
+  EXPECT_GE(requested, pool.bytes_allocated() - before_bytes)
+      << "the table allocated more than it announced";
+  EXPECT_EQ(table.rows(), 5000);
+
+  const int64_t held = table.memory_bytes();
+  const int64_t allocated = pool.bytes_allocated();
+  std::vector<int64_t> more(20000);
+  for (size_t i = 0; i < more.size(); ++i) more[i] = 100000 + static_cast<int64_t>(i);
+  auto refused = table.Insert({Ints(more)}, 20000, [](int64_t) { return false; });
+  ASSERT_TRUE(refused.ok());
+  EXPECT_FALSE(*refused);
+  EXPECT_EQ(table.rows(), 5000);
+  EXPECT_EQ(table.memory_bytes(), held);
+  EXPECT_EQ(pool.bytes_allocated(), allocated);
+}
+
 }  // namespace
 }  // namespace quarry

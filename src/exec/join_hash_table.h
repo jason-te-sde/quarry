@@ -5,11 +5,13 @@
 #include <arrow/status.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <span>
 #include <vector>
 
 #include "exec/key_index.h"
+#include "exec/pool_vector.h"
 
 namespace quarry {
 
@@ -20,10 +22,18 @@ class JoinHashTable {
  public:
   static constexpr uint32_t kNoRow = UINT32_MAX;
 
-  explicit JoinHashTable(KeyHasher hasher = {});
+  // The key index, the chains and the key bytes are allocated from `pool`.
+  explicit JoinHashTable(KeyHasher hasher = {},
+                         arrow::MemoryPool* pool = arrow::default_memory_pool());
 
-  // Adds `n` build rows, given by their key columns.
-  arrow::Status Insert(const std::vector<std::shared_ptr<arrow::Array>>& keys, int64_t n);
+  // Asked for the bytes of new storage an insert is about to allocate; false refuses them.
+  using ChargeFn = std::function<bool(int64_t bytes)>;
+
+  // Adds `n` build rows, given by their key columns. With `charge`, the storage the rows need is
+  // announced to it before it is allocated; when it refuses, nothing is inserted and the result is
+  // false. True when the rows are in.
+  arrow::Result<bool> Insert(const std::vector<std::shared_ptr<arrow::Array>>& keys, int64_t n,
+                             const ChargeFn& charge = {});
 
   // The number of build rows inserted so far.
   int64_t rows() const { return static_cast<int64_t>(next_.size()); }
@@ -42,9 +52,9 @@ class JoinHashTable {
 
  private:
   KeyIndex index_;
-  std::vector<uint32_t> head_;  // per distinct key
-  std::vector<uint32_t> tail_;
-  std::vector<uint32_t> next_;  // per build row
+  PoolVector<uint32_t> head_;  // per distinct key
+  PoolVector<uint32_t> tail_;
+  PoolVector<uint32_t> next_;  // per build row
 };
 
 }  // namespace quarry

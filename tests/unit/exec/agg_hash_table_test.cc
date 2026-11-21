@@ -169,7 +169,7 @@ TEST(AggHashTableTest, WideDecimalSumsAndOverflow) {
   AggHashTable table({}, {Spec(AggFunc::kSum, wide)});
   const Int128 big = PowerOfTen<Int128>(37) * 9;
   ASSERT_TRUE(table.Update({}, {Decimal128Array({big}, 38, 0)}, 1).ok());
-  const arrow::Status overflow = table.Update({}, {Decimal128Array({big}, 38, 0)}, 1);
+  const arrow::Status overflow = table.Update({}, {Decimal128Array({big}, 38, 0)}, 1).status();
   ASSERT_FALSE(overflow.ok());
   EXPECT_NE(overflow.message().find("overflow"), std::string::npos) << overflow.ToString();
 }
@@ -220,7 +220,7 @@ TEST(AggHashTableTest, MemoryIsChargedToTheReservationAndRefusedOverTheLimit) {
 
   keys.clear();
   for (int64_t i = 0; i < 20000; ++i) keys.push_back(1000 + i);
-  const arrow::Status status = table.Update({Int64Array(keys)}, {nullptr}, 20000);
+  const arrow::Status status = table.Update({Int64Array(keys)}, {nullptr}, 20000).status();
   ASSERT_TRUE(status.IsOutOfMemory()) << status.ToString();
   EXPECT_NE(status.message().find("resource exhausted: HashAggregate #1 needs"), std::string::npos)
       << status.message();
@@ -350,9 +350,19 @@ TEST(AggHashTableTest, ASpillableTableReportsOverBudgetInsteadOfFailingAndClearR
   table.set_spillable(true);
   std::vector<int64_t> keys(500);
   for (size_t i = 0; i < keys.size(); ++i) keys[i] = static_cast<int64_t>(i);
-  ASSERT_TRUE(table.Update({Int64Array(keys)}, {nullptr}, 500).ok());
+  // The table pays for the storage a new group needs before it allocates it. When it cannot, it
+  // stops (false), over budget, still within the budget it was given, and the caller spills it.
+  const auto folded = table.Update({Int64Array(keys)}, {nullptr}, 500);
+  ASSERT_TRUE(folded.ok()) << folded.status().ToString();
+  EXPECT_FALSE(*folded);
   EXPECT_TRUE(table.over_budget());
-  EXPECT_EQ(table.num_groups(), 500);  // the rows were folded in, only the charge was refused
+  EXPECT_GT(table.num_groups(), 0);
+  EXPECT_LT(table.num_groups(), 500);
+  EXPECT_LE(reservation.size(), 2000);
+  EXPECT_LE(table.memory_bytes(), 2000) << "the table allocated beyond what it was allowed";
+  // What it did hold can be written out: every group has a complete state.
+  auto partial = table.FinishPartial(0, table.num_groups(), arrow::default_memory_pool());
+  ASSERT_TRUE(partial.ok()) << partial.status().ToString();
   table.Clear();
   EXPECT_FALSE(table.over_budget());
   EXPECT_EQ(table.num_groups(), 0);
@@ -360,6 +370,47 @@ TEST(AggHashTableTest, ASpillableTableReportsOverBudgetInsteadOfFailingAndClearR
   ASSERT_TRUE(table.Update({Int64Array({1, 2, 1})}, {nullptr}, 3).ok());
   EXPECT_FALSE(table.over_budget());
   EXPECT_EQ(Rows(table), (std::vector<std::string>{"1|2", "2|1"}));
+}
+
+// Handing the groups out in batches calls Finish once per batch. It must work on the groups it is
+// asked for: counting what it allocates (every temporary comes from the pool it is given) shows
+// the cost without a clock. With work on every group per call, 200,000 groups in batches of 64
+// allocate several gigabytes; proportional to the groups they allocate a few megabytes.
+TEST(AggHashTableTest, FinishingInBatchesAllocatesInProportionToTheGroupsFinished) {
+  constexpr int64_t kGroups = 200000;
+  constexpr int64_t kBatch = 64;
+  AggHashTable table({LogicalType::Int64()},
+                     {CountStar(), Spec(AggFunc::kAvg, LogicalType::Int64()),
+                      Spec(AggFunc::kAvg, LogicalType::Double()),
+                      Spec(AggFunc::kSum, LogicalType::Int64())});
+  std::vector<int64_t> keys(kGroups);
+  std::vector<double> doubles(kGroups);
+  for (int64_t i = 0; i < kGroups; ++i) {
+    keys[static_cast<size_t>(i)] = i;
+    doubles[static_cast<size_t>(i)] = static_cast<double>(i);
+  }
+  ASSERT_TRUE(table
+                  .Update({Int64Array(keys)},
+                          {nullptr, Int64Array(keys), DoubleArray(doubles), Int64Array(keys)},
+                          kGroups)
+                  .ok());
+  arrow::ProxyMemoryPool pool(arrow::default_memory_pool());
+  int64_t finished = 0;
+  for (int64_t first = 0; first < kGroups; first += kBatch) {
+    auto columns = table.Finish(first, std::min(kBatch, kGroups - first), &pool);
+    ASSERT_TRUE(columns.ok()) << columns.status().ToString();
+    finished += (*columns)[0]->length();
+  }
+  EXPECT_EQ(finished, kGroups);
+  EXPECT_LT(pool.total_bytes_allocated(), kGroups * 400)
+      << "Finish allocated in proportion to all the groups on every call";
+  // The partial states written when spilling are cut the same way.
+  arrow::ProxyMemoryPool partial_pool(arrow::default_memory_pool());
+  for (int64_t first = 0; first < kGroups; first += kBatch) {
+    auto columns = table.FinishPartial(first, std::min(kBatch, kGroups - first), &partial_pool);
+    ASSERT_TRUE(columns.ok()) << columns.status().ToString();
+  }
+  EXPECT_LT(partial_pool.total_bytes_allocated(), kGroups * 400);
 }
 
 }  // namespace

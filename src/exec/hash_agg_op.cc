@@ -38,8 +38,8 @@ class HashAggregateOperator final : public Operator {
       spec.result_type = a.result_type;
       specs.push_back(spec);
     }
-    table_ =
-        std::make_unique<AggHashTable>(std::move(key_types), std::move(specs), reservation_.get());
+    table_ = std::make_unique<AggHashTable>(std::move(key_types), std::move(specs),
+                                            reservation_.get(), KeyHasher{}, context.pool);
     // Without a spill directory a table that does not fit is an error, as before.
     table_->set_spillable(context.spill != nullptr);
     return input_->Open(context);
@@ -108,14 +108,19 @@ class HashAggregateOperator final : public Operator {
       const int64_t step = std::max<int64_t>(1, StateSliceRows(*context_, rows));
       for (int64_t offset = 0; offset < rows; offset += step) {
         const int64_t length = std::min(step, rows - offset);
-        ARROW_RETURN_NOT_OK(
-            table_->Update(Slice(keys, offset, length), Slice(args, offset, length), length));
-        if (table_->over_budget()) {
-          if (first_spill_ == nullptr) {
-            first_spill_ = NewPartitions(0);
-            spilled_ = true;
+        // A table that cannot pay for the storage these rows need refuses them (folded is false)
+        // with nothing changed; it is spilled and emptied, and the same rows go in again.
+        for (bool folded = false; !folded;) {
+          ARROW_ASSIGN_OR_RAISE(
+              folded, table_->Update(Slice(keys, offset, length), Slice(args, offset, length),
+                                     length));
+          if (table_->over_budget()) {
+            if (first_spill_ == nullptr) {
+              first_spill_ = NewPartitions(0);
+              spilled_ = true;
+            }
+            ARROW_RETURN_NOT_OK(SpillTable(first_spill_.get()));
           }
-          ARROW_RETURN_NOT_OK(SpillTable(first_spill_.get()));
         }
       }
     }
@@ -200,15 +205,20 @@ class HashAggregateOperator final : public Operator {
                                       Slice(keys, offset, length), split.get()));
           continue;
         }
-        ARROW_RETURN_NOT_OK(table_->MergePartial(Slice(keys, offset, length),
-                                                 Slice(partials, offset, length), length));
-        if (!table_->over_budget()) continue;
+        ARROW_ASSIGN_OR_RAISE(const bool folded,
+                              table_->MergePartial(Slice(keys, offset, length),
+                                                   Slice(partials, offset, length), length));
+        if (folded && !table_->over_budget()) continue;
         if (work.depth >= kMaxSpillDepth) {
           return PartitionTooLarge(*context_, reservation_->owner(), table_->memory_bytes(),
                                    work.depth);
         }
         split = NewPartitions(work.depth + 1);
         ARROW_RETURN_NOT_OK(SpillTable(split.get()));
+        if (!folded) {
+          ARROW_RETURN_NOT_OK(Forward(SliceBatch(*batch, offset, length),
+                                      Slice(keys, offset, length), split.get()));
+        }
       }
     }
     reader.reset();

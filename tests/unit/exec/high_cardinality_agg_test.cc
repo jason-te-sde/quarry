@@ -94,6 +94,21 @@ TEST_F(HighCardinalityAggTest, SmallBatchesGiveTheSameAnswer) {
       "SELECT l_orderkey, COUNT(*), SUM(l_extendedprice) FROM lineitem GROUP BY l_orderkey", 7);
 }
 
+// AVG and COUNT per group used to do work on every group once per output batch. At batch size 1 that
+// is one pass over 15,000 groups for each of 15,000 batches. The pool the query runs in counts what
+// producing the output allocates, so the test counts instead of timing; the ctest timeout is the
+// backstop.
+TEST_F(HighCardinalityAggTest, AvgAndCountPerOrderKeyAtBatchSizeOneDoNotGrowQuadratically) {
+  const std::string sql =
+      "SELECT l_orderkey, AVG(l_extendedprice), COUNT(*) FROM lineitem GROUP BY l_orderkey";
+  auto result = MakeEngine(0, 1)->Execute(sql);
+  ASSERT_TRUE(result.ok()) << result.status().ToString();
+  EXPECT_EQ(result->table->num_rows(), 15000);
+  auto reference = MakeEngine(0, 2048)->Execute(sql);
+  ASSERT_TRUE(reference.ok());
+  EXPECT_EQ(SortedRows(*result->table), SortedRows(*reference->table));
+}
+
 TEST_F(HighCardinalityAggTest, AnAggregateWithoutGroupByNeverNeedsToSpill) {
   auto result = MakeEngine(kLimit)->Execute(
       "SELECT COUNT(*), SUM(l_extendedprice), MIN(l_comment), AVG(l_quantity) FROM lineitem");
