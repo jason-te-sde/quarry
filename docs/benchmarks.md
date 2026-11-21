@@ -137,6 +137,28 @@ filter, hash build, probe, aggregate, sort or other. It names the three largest 
 ties each to a frame or an operator; where it has no frame or number behind a claim, it says
 nothing.
 
+### Procedure
+
+The call graphs under `bench/results/profile/` are taken as follows, on the SF1 default export,
+with nothing else running.
+
+1. The operator times: `build/release/tools/quarry query --data bench/data/sf1 -c "$(cat tests/tpch/queries/q5.sql)" --explain-analyze`,
+   saved as `bench/results/profile/explain-analyze-<name>.txt` (`--disable-rule order_joins` for the
+   `q5-without-order_joins` name).
+2. The samples, from the quarry process itself (the DuckDB worker is never sampled): start
+   `build/release/tools/quarry query --data bench/data/sf1 -c "$(cat tests/tpch/queries/<name>.sql)" --repeat N --timing-json /dev/null`
+   in the background, with N large enough that the loop is still running 10 seconds later (a query
+   of 0.3 s needs N of at least 40, one of 4 s needs 5; the loop repeats the same query, so N does
+   not change what is sampled). Wait until the warm-up has finished, then run
+   `sample <pid> 10 1 -file callgraph-<name>.txt` (10 seconds, one sample per millisecond, all
+   threads). Stop the quarry process afterwards.
+3. Keep the "Call graph:" section of the output, compress it as
+   `bench/results/profile/callgraph-<name>.txt.gz`, and run `uv run bench/classify_samples.py`,
+   which writes `classified.json`. Rendering the profile tables is `bench/render_tables.py`.
+
+The samples describe where the time is in a profiling run. They are not a measured run and are
+not compared with DuckDB.
+
 ## Results
 
 The tables below are rendered, not typed. They stay empty until a result is committed.
