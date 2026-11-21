@@ -14,20 +14,29 @@ process's other memory. `0` or no flag means unlimited and never touches the dis
 
 What to count on, in three parts:
 
-- **The operators' pool** stays within the limit plus 256 KiB <!-- const: the margin of ADR 0006, asserted by the near-limit test; the limits named below are that test's --> for a hash aggregate and a hash join: spill-writer buffers, one input batch
-  and expression temporaries. `tests/unit/exec/near_limit_test.cc` runs a high-cardinality aggregate and
+- **The operators' pool** stays within the limit plus 256 KiB <!-- const: the margin of ADR 0006, asserted by the near-limit test; the limits named below are that test's --> for the state that the budget charges, in a hash aggregate and a hash join: the hash tables, spill-writer buffers, one input batch and expression temporaries. `tests/unit/exec/near_limit_test.cc` runs a high-cardinality aggregate and
   joins at 1, 16 and 64 MiB (and an aggregate at 128 MiB) and asserts it; the measured peaks are in
-  [ADR 0006](design/0006-memory-and-spill.md#the-margin-and-how-it-is-measured).
+  [ADR 0006](design/0006-memory-and-spill.md#the-margin-and-how-it-is-measured). **This bound does not
+  hold for a join's build side.** The join concatenates its build rows into one array per column, and
+  the budget charges one copy of them. The copy that is not charged is in the operator pool when the
+  build input is filtered, is the output of another join or aggregate, or is read back from a spill
+  file; only for a build input that is a bare, unfiltered scan do the batches being copied live in the
+  scan's pool. The pool can then pass the limit by up to the payload of the build partition that is in
+  memory, and above 2^20 build rows by up to twice that, because the concatenation holds the parts,
+  the pieces and the final array of a column at once. Measured: Q5 at `--memory-limit 16MB` peaks at
+  <!-- n:spill.q5.16MB.state -->17.09<!-- /n --> MB in the operator pool (the README's spill table). The test with a filtered build side
+  pins the overshoot as it is. It is a known issue (CHANGELOG), and charging the concatenation, or releasing the parts as they are copied, would remove it.
 - **One row group per scan** comes on top. It is allocated from the scan's own pool and is often tens
   of MiB.
-- **A join's or a sort's input exists twice for a moment.** The join keeps the build rows as the batches
-  the scan produced, which live in the scan's pool, and then copies them into one array per column in
-  the operator pool before it releases them. The budget charges one copy, so while the copy is made the
-  process holds the limit plus up to the size of the build payload (at most the limit again, as the
-  payload is part of what is charged); the near-limit test measures this for a join, with the pool and
-  the scan pool side by side. The sort compacts its input into the operator pool and concatenates it
-  there, so the pool itself can hold the sorted input twice, up to twice the limit; this is read from
-  the code and not measured. For an aggregate there is no copy.
+- **A join's or a sort's input exists twice for a moment.** For a join whose build input is a bare
+  scan, the build rows are the batches the scan produced, which live in the scan's pool, and the join
+  copies them into one array per column in the operator pool before it releases them. The budget
+  charges one copy, so while the copy is made the process holds the limit plus up to the size of the
+  build payload; the near-limit test measures this for a join, with the pool and the scan pool side by
+  side. For any other build input the second copy is in the operator pool, as the first bullet says.
+  The sort compacts its input into the operator pool and concatenates it there, so the pool itself can
+  hold the sorted input twice, up to twice the limit; this is read from the code and not measured. For
+  an aggregate there is no copy.
 
 - A join or aggregation that does not fit **spills** and is slower, not wrong: the answer is the
   same at every limit. Q5 at scale factor 1 takes <!-- n:spill.q5.16MB.ms -->8,124<!-- /n --> ms at `--memory-limit 16MB` against

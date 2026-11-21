@@ -48,7 +48,13 @@ struct QueryResult {
   // buffers, spill buffers and concatenation copies, whether or not the memory budget charged them.
   // The strings that MIN and MAX of a VARCHAR keep are not in it. The result table is copied out of
   // the pool as it is produced, so it is not counted. Scans allocate from a pool of their own,
-  // reported next to it; a join's build rows are first in that pool and then copied into this one.
+  // reported next to it.
+  //
+  // With a memory limit, this stays within the limit plus 256 KiB for what the budget charges. A
+  // join's concatenation of its build rows is not charged: it makes a second copy, and that copy is
+  // in this pool when the build input is filtered, is another operator's output or is read back from
+  // a spill file, so the peak can pass the limit by up to the in-memory build payload (more above
+  // 2^20 build rows). See docs/design/0006-memory-and-spill.md and the known issues in CHANGELOG.md.
   int64_t pool_peak_bytes = 0;
   int64_t scan_pool_peak_bytes = 0;
 };

@@ -92,6 +92,16 @@ The first release.
 
 Found before this release and not fixed in it; each is small, and none returns a wrong answer.
 
+- **A join's pool can pass the memory limit.** The operators' pool stays within the limit plus
+  256 KiB for the state the budget charges, but not for a join's build side. `ConcatenateBuild` copies
+  the build rows into one array per column, and the budget charges one copy. The second copy sits in
+  the operator pool when the build input is filtered, is another join's or aggregate's output, or is
+  read back from a spill file, so the pool can pass the limit by up to the payload of the build
+  partition in memory, and above 2^20 build rows by up to twice that. Measured: Q5 at
+  `--memory-limit 16MB` has a pool peak of 17,091,680 bytes against a limit of 16,000,000 and a bound of
+  16,262,144. A near-limit test with a filtered build side pins the overshoot at one build payload. The
+  fix is to charge the concatenation before it is made and spill or split when that is refused, or to
+  release the parts as they are copied. The answers are right at every limit.
 - **Limits that are documented.** A sort that does not fit its limit stops with `resource exhausted`
   (there is no external sort). A sort holds its input twice in the operator pool while it concatenates
   it, so its pool peak can reach twice the limit. The strings that `MIN` and `MAX` of a `VARCHAR` keep

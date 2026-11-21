@@ -3,7 +3,8 @@
 // smaller limits (they spill) and about as large as the largest (they nearly fit). At every limit
 // the memory the query's operators allocated, as the query's own pool counts it, must stay within
 // the limit plus a margin that is a stated function of what is allocated beyond the charge; see
-// docs/design/0006-memory-and-spill.md.
+// docs/design/0006-memory-and-spill.md. The one exception is a join's build concatenation, whose
+// uncharged second copy is pinned by its own test below.
 
 #include <gtest/gtest.h>
 
@@ -40,6 +41,7 @@ class NearLimitTest : public ::testing::Test {
   static constexpr int64_t kAggRows = 600000;
   static constexpr int64_t kJoinBuildRows = 500000;
   static constexpr int64_t kJoinProbeRows = 600000;
+  static constexpr int64_t kWideRows = 16000;
 
   void SetUp() override {
     std::vector<int64_t> keys(kAggRows);
@@ -79,7 +81,7 @@ class NearLimitTest : public ::testing::Test {
   // hash table. The charge for it nearly reaches the limit while the concatenation of the build
   // rows holds a second and third copy that the charge does not cover.
   void WriteWide() {
-    constexpr int64_t kRows = 16000;
+    constexpr int64_t kRows = kWideRows;
     std::vector<int64_t> keys(kRows);
     std::vector<std::string> text(kRows);
     for (int64_t i = 0; i < kRows; ++i) {
@@ -202,6 +204,33 @@ TEST_F(NearLimitTest, AJoinWhoseBuildRowsNearlyFillTheLimitStaysWithinTheMargin)
     EXPECT_EQ(Cell0(result, 0), Cell0(reference, 0));
     EXPECT_EQ(Cell0(result, 1), Cell0(reference, 1));
     EXPECT_LE(result.pool_peak_bytes, limit + Margin(limit)) << "limit " << limit;
+  }
+}
+
+// The documented overshoot, pinned. A join concatenates its build side into one array per column and
+// the budget charges one copy of it. When the build input is filtered, is another operator's output
+// or is read back from a spill file, its batches already sit in the operator pool, so the second
+// copy is in the pool too. The pool may then hold the limit, the margin and one more copy of the
+// build payload (ADR 0006, "The margin, and how it is measured"). A fix that charges the concatenation, or
+// releases the parts as they are copied, makes the overshoot zero and this bound can be tightened
+// to `limit + Margin(limit)`.
+TEST_F(NearLimitTest, AJoinWhoseBuildInputIsFilteredStaysWithinTheLimitMarginAndOneBuildCopy) {
+  WriteWide();
+  // The filter drops about one row in 26, so every batch of the scan carries a selection.
+  const std::string sql =
+      "SELECT COUNT(*), MIN(w.t), SUM(w.k) FROM wide_probe p JOIN wide w ON p.k = w.k "
+      "WHERE w.t > 'b'";
+  const QueryResult reference = Run(sql, 0);
+  Report("filtered", 0, reference);
+  // The payload of the build rows that pass the filter: the key, the 400 bytes of text and its offset.
+  const int64_t build_payload = kWideRows * (8 + 400 + 4) * 25 / 26;
+  for (const int64_t limit : {2 * kMiB, 8 * kMiB, 16 * kMiB}) {
+    const QueryResult result = Run(sql, limit);
+    Report("filtered", limit, result);
+    EXPECT_EQ(Cell0(result, 0), Cell0(reference, 0));
+    EXPECT_EQ(Cell0(result, 1), Cell0(reference, 1));
+    EXPECT_EQ(Cell0(result, 2), Cell0(reference, 2));
+    EXPECT_LE(result.pool_peak_bytes, limit + Margin(limit) + build_payload) << "limit " << limit;
   }
 }
 

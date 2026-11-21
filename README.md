@@ -37,14 +37,17 @@ Not that it runs: that it is checked, and that its slowness is explained.
    aggregations that do not fit spill to disk and return the same answer; a sort that does not fit
    stops with an error that says what it needed. The hash tables' storage (key index, key arena,
    aggregate states, join chains) is allocated from the query's memory pool, and a table pays for a
-   growth before it allocates it. The pool the operators allocate from is measured against the limit
-   plus a margin of 256 KiB <!-- const: the margin the tests assert -->: for the TPC-H queries under a tiny limit
+   growth before it allocates it. The pool the operators allocate from stays within the limit plus a margin of 256 KiB <!-- const: the margin the tests assert --> for what the budget charges: for the TPC-H queries under a tiny limit
    ([tests/tpch/tpch_budget_test.cc](tests/tpch/tpch_budget_test.cc)) and for an aggregate with
    600,000 groups and joins at several limits
    ([tests/unit/exec/near_limit_test.cc](tests/unit/exec/near_limit_test.cc), with its measured peaks in
-   [ADR 0006](docs/design/0006-memory-and-spill.md#the-margin-and-how-it-is-measured)). The limit does not
-   bound one Parquet row group per scan, and a join or sort holds its input twice while it
-   concatenates it, so the process can use about twice the limit
+   [ADR 0006](docs/design/0006-memory-and-spill.md#the-margin-and-how-it-is-measured)). **It does not
+   hold for a join's build side:** the concatenation of the build rows makes a second copy that the budget does
+   not charge, and the copy is in the operator pool when the build input is filtered, is another operator's
+   output or is read back from a spill file. Q5 at 16MB peaks at <!-- n:spill.q5.16MB.state -->17.09<!-- /n --> MB, above its limit
+   ([known issue](CHANGELOG.md#known-issues)); a test pins the overshoot at the build payload. The limit also does not
+   bound one Parquet row group per scan, and a sort holds its input twice while it concatenates it,
+   so the process can use about twice the limit
    ([operations](docs/operations.md#picking-a-memory-limit)).
    Spilling itself is tested in [tests/unit/exec/spill_test.cc](tests/unit/exec/spill_test.cc).
 4. **Where the time goes is measured, not guessed.** `--explain-analyze` prints the rows, batches, own

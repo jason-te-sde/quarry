@@ -133,27 +133,44 @@ otherwise hide the operators' peak). Scans have a pool of their own (the Parquet
 from it), reported as `scan_pool_peak_bytes` and not included, as scan buffers are not charged
 either.
 
-**The stated margin is a function of what the pool holds beyond the charge.** For a hash aggregate
-and a hash join, the operators' pool stays within `limit + 256 KiB`: the fixed part is the
-spill-writer buffers (up to 4 KiB plus one batch's share of that partition, for each of up to 16
+**The stated margin is a function of what the pool holds beyond the charge, and it holds for the
+operator state that the budget charges.** For a hash aggregate, and for a hash join apart from the
+build-side concatenation below, the operators' pool stays within `limit + 256 KiB`: the fixed part is
+the spill-writer buffers (up to 4 KiB plus one batch's share of that partition, for each of up to 16
 files, twice while a partition is being split), one input batch and its evaluated keys, and
 expression temporaries. Rows hundreds of bytes wide scale the writer buffers with row width times
 batch size; the margin is not a guarantee for them. The part that used to grow with the table (the
 slot array of a rehash, the arena and the state vectors, each held twice while it was copied) is
-charged before it is allocated, so it is no longer in the margin. The whole process is a different
-sum, and two parts of it are outside the pool bound: <!-- const: the margin is the constant asserted by the tests named below -->
+charged before it is allocated, so it is no longer in the margin. Three things are outside the pool
+bound, and the first is a case where the pool itself passes the limit: <!-- const: the margin is the constant asserted by the tests named below -->
 
+- **A join's build concatenation.** `ConcatenateBuild` copies the build rows into one array per
+  column, and the budget charges one copy of them. The copy that is not charged sits in the operator
+  pool whenever the build batches are already in it, which is the case when the build input is
+  filtered (`Build` compacts a batch that carries a selection into the pool), is the output of another
+  join or aggregate, or is read back from a spill file. Only a bare, unfiltered scan keeps its
+  batches in the scan pool. The overshoot is the payload of the build partition that is in memory
+  while it is concatenated, so it grows with the build side: up to one build payload above
+  `limit + 256 KiB`, and above 2^20 build rows up to two, because the grouped concatenation then holds
+  the parts, the pieces and the final array of a column at once. The measured case is Q5 at
+  `--memory-limit 16MB` in the README's spill table: a pool peak of 17,091,680 bytes against a limit of
+  16,000,000 and a bound of 16,262,144, which is 829,536 bytes over the bound. The near-limit test
+  with a filtered build side pins the overshoot at one build payload, so a fix can tighten it. The fix
+  is to charge the concatenation before it is made (and spill or split when it is refused), or to
+  release the parts as they are copied; it is a known issue in the CHANGELOG.
 - **One row group per scan**, allocated from the scan pool: not charged, reported separately.
-- **A copy that is made while the original is alive.** A join keeps its build rows as the batches the
-  scan produced (in the scan pool) and concatenates them into one array per column (in the operator
-  pool); the budget charges one copy, so for that moment the process holds up to the build payload
-  twice. The sort concatenates in the operator pool, so there the pool itself holds its input twice.
-  The first is measured by the wide-join case below (the pool peak and the scan pool side by side);
-  the second is read from the code and not measured.
+- **A copy that is made while the original is alive, in the scan pool.** A join whose build input is
+  a bare scan keeps its build rows as the batches the scan produced (in the scan pool) and
+  concatenates them into one array per column (in the operator pool); the budget charges one copy, so
+  for that moment the process holds up to the build payload twice. The sort concatenates in the
+  operator pool, so there the pool itself holds its input twice. The first is measured by the wide-join
+  case below (the pool peak and the scan pool side by side); the second is read from the code and not
+  measured.
 <!-- const: the margin and the limits named here are those of tests/unit/exec/near_limit_test.cc and tests/tpch/tpch_budget_test.cc, which assert them -->
 
 `TpchBudgetTest`, `HighCardinalityAggTest` and `NearLimitTest` assert `pool_peak_bytes <= limit + 256
-KiB`. Measured on SF0.01 with the dev build (`--explain-analyze` prints `pool_peak=`):
+KiB` on the data they use, which is small enough that no build concatenation passes it. The one case that
+builds a large filtered side, in `NearLimitTest`, asserts `limit + 256 KiB` plus one build payload. Measured on SF0.01 with the dev build (`--explain-analyze` prints `pool_peak=`):
 
 | Query | budget | pool_peak | scan pool |
 | --- | --- | --- | --- |
@@ -172,7 +189,8 @@ it is expression temporaries, not state.
 `NearLimitTest` drives the same check where a hash table grows until it reaches the limit: an
 aggregate of 600,000 groups (`k`, `SUM`, `COUNT`, `AVG`, `MIN`), a join with a build side of 500,000
 rows of four columns, and a join whose 16,000 build rows are 400 bytes wide (about 6.4 MiB of
-payload under an 8 MiB limit). Dev build; the pool peak is what the assertion is on: <!-- const: the sizes of the test's data -->
+payload under an 8 MiB limit), and the same join with a filter on the build side that drops one row in
+26, which makes every build batch carry a selection. Dev build; the pool peak is what the assertion is on: <!-- const: the sizes of the test's data -->
 
 | Query | limit | pool peak | beyond the limit | scan pool | spilled |
 | --- | --- | --- | --- | --- | --- |
@@ -181,23 +199,31 @@ payload under an 8 MiB limit). Dev build; the pool peak is what the assertion is
 | aggregate | 16 MiB | 7.72 MiB | -8.28 MiB | 0.05 MiB | yes |
 | aggregate | 64 MiB | 30.78 MiB | -33.22 MiB | 0.05 MiB | yes |
 | aggregate | 128 MiB | 61.50 MiB | -66.50 MiB | 0.05 MiB | yes |
-| join | unlimited | 11.48 MiB | - | 11.65 MiB | no |
-| join | 1 MiB | 0.11 MiB | -0.89 MiB | 0.24 MiB | yes |
-| join | 16 MiB | 0.74 MiB | -15.26 MiB | 3.10 MiB | yes |
-| join | 64 MiB | 11.48 MiB | -52.52 MiB | 11.65 MiB | no |
-| wide join | unlimited | 6.70 MiB | - | 6.50 MiB | no |
-| wide join | 2 MiB | 0.64 MiB | -1.36 MiB | 2.08 MiB | yes |
-| wide join | 8 MiB | 6.70 MiB | -1.30 MiB | 6.50 MiB | no |
-| wide join | 16 MiB | 6.70 MiB | -9.30 MiB | 6.50 MiB | no |
+| join | unlimited | 41.98 MiB | - | 11.65 MiB | no |
+| join | 1 MiB | 0.76 MiB | -0.24 MiB | 0.24 MiB | yes |
+| join | 16 MiB | 8.14 MiB | -7.86 MiB | 3.10 MiB | yes |
+| join | 64 MiB | 42.01 MiB | -21.99 MiB | 11.65 MiB | no |
+| wide join | unlimited | 7.65 MiB | - | 6.50 MiB | no |
+| wide join | 2 MiB | 0.93 MiB | -1.07 MiB | 2.08 MiB | yes |
+| wide join | 8 MiB | 7.65 MiB | -0.35 MiB | 6.50 MiB | no |
+| wide join | 16 MiB | 7.65 MiB | -8.35 MiB | 6.50 MiB | no |
+| wide join, filtered build | unlimited | 13.03 MiB | - | 0.87 MiB | no |
+| wide join, filtered build | 2 MiB | 2.22 MiB | 0.22 MiB | 0.87 MiB | yes |
+| wide join, filtered build | 8 MiB | 13.04 MiB | 5.04 MiB | 0.87 MiB | no |
+| wide join, filtered build | 16 MiB | 13.04 MiB | -2.96 MiB | 0.87 MiB | no |
 <!-- obs: printed by NearLimitTest (dev build); no results file holds them, the test asserts the bound -->
 
-Two things the table shows. The aggregate spills at 128 MiB although its unlimited peak is 110.5
+Three things the table shows. The aggregate spills at 128 MiB although its unlimited peak is 110.5
 MiB: paying for the doubling of the slot array before it is allocated counts the old and the new
 array together, so the table is refused earlier than its final size suggests, and the pool never
-reaches the limit. And the wide join, which does not spill at 8 MiB, holds 6.70 MiB in the operator
-pool and 6.50 MiB in the scan pool at once: the build payload twice, 13.2 MiB for a limit of 8 MiB,
-which is the second bullet above. The pool bound holds; the process bound at a large limit is
-about twice the limit for a join and a sort, and `docs/operations.md` says so.
+reaches the limit. The wide join, which does not spill at 8 MiB, holds 7.65 MiB in the operator
+pool and 6.50 MiB in the scan pool at once: the build payload twice, 14.15 MiB for a limit of 8 MiB,
+which is the third bullet above. And the wide join with a filtered build side, which does not spill
+at 8 MiB either, holds 13.04 MiB in the operator pool alone, 5.04 MiB above the limit: the build
+payload is in the pool twice (the compacted batches and their concatenation) and the budget charged
+one copy, which is the first bullet above. The pool bound holds for what the budget charges and does
+not hold for a join's build concatenation; the process bound at a large limit is about twice the
+limit for a join and a sort, and `docs/operations.md` says so.
 <!-- obs: read off the table above -->
 
 The measurement is itself tested: `-DQUARRY_FLAW=spill_retains_rows` makes the spill keep a copy of
