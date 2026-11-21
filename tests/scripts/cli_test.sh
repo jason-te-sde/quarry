@@ -85,6 +85,29 @@ expect_status "help" 0 "$quarry" --help
 expect_contains "help" "$out" "--memory-limit"
 expect_status "a missing query file" 1 "$quarry" query --data "$data" -f tests/no-such-file.sql
 
+# --repeat: one warm-up and N measured executions in one process, timed from the SQL text to the
+# materialised table, written as JSON. Nothing is printed.
+timing="$(dirname "$stderr_file")/quarry-cli-timing.json"
+expect_status "repeat" 0 "$quarry" query --data "$data" -c "$q" --repeat 3 --timing-json "$timing"
+[ -z "$out" ] || fail "repeat: expected no output, got: $out"
+timing_text="$(cat "$timing")"
+expect_contains "repeat" "$timing_text" '"warmup":{"ns":'
+expect_contains "repeat" "$timing_text" '"peak_rss_bytes":'
+expect_contains "repeat" "$timing_text" '"pool_peak_bytes":'
+expect_contains "repeat" "$timing_text" '"scan_pool_peak_bytes":'
+expect_contains "repeat" "$timing_text" '"spilled_bytes":0'
+expect_contains "repeat" "$timing_text" '"rows":2'
+[ "$(printf '%s' "$timing_text" | grep -o '"load_1m"' | wc -l | tr -d ' ')" -eq 4 ] ||
+  fail "repeat: expected a load average for the warm-up and each of 3 runs: $timing_text"
+expect_status "repeat, a failing query" 1 "$quarry" query --data "$data" -c "SELECT nope FROM region" \
+  --repeat 2 --timing-json "$timing"
+expect_contains "repeat, a failing query" "$(cat "$timing")" '"error":"binder error at 1:8'
+expect_status "repeat without --timing-json" 2 "$quarry" query --data "$data" -c "$q" --repeat 2
+expect_status "--timing-json without --repeat" 2 "$quarry" query --data "$data" -c "$q" --timing-json "$timing"
+expect_status "repeat with explain" 2 "$quarry" query --data "$data" -c "$q" --repeat 2 --timing-json "$timing" --explain
+expect_status "a bad repeat" 2 "$quarry" query --data "$data" -c "$q" --repeat 0 --timing-json "$timing"
+rm -f "$timing"
+
 # The schema command keeps working.
 expect_status "schema" 0 "$quarry" schema "$data/region.parquet"
 expect_contains "schema" "$out" "r_name"

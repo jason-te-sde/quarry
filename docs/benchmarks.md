@@ -54,7 +54,7 @@ Each run is timed from the moment the SQL text is in hand to the moment the whol
 materialised in memory as an Arrow table. Parsing, binding, planning and optimisation are inside
 the timing; process start, registering the files and printing are outside it. The clock is a
 monotonic clock (`std::chrono::steady_clock` in quarry, `time.perf_counter_ns` in the DuckDB
-worker). DuckDB's result is materialised with `fetch_arrow_table()`.
+worker). DuckDB's result is materialised with `to_arrow_table()`.
 
 ## Process model and repetitions
 
@@ -129,3 +129,49 @@ with macOS `sample` taken during a looping run, and classifies the top frames as
 filter, hash build, probe, aggregate, sort or other. It names the three largest gaps to DuckDB and
 ties each to a frame or an operator; where it has no frame or number behind a claim, it says
 nothing.
+
+## Results
+
+The tables below are rendered, not typed. They stay empty until a result is committed.
+
+### Environment
+
+<!-- bench:environment -->
+_No result is committed for this table yet._
+<!-- /bench:environment -->
+
+### quarry against DuckDB
+
+<!-- bench:main -->
+_No result is committed for this table yet._
+<!-- /bench:main -->
+
+### Memory
+
+<!-- bench:memory -->
+_No result is committed for this table yet._
+<!-- /bench:memory -->
+
+### Ablation: batch size
+
+<!-- bench:ablation-batch -->
+_No result is committed for this table yet._
+<!-- /bench:ablation-batch -->
+
+### Ablation: row-group pruning
+
+<!-- bench:ablation-pruning -->
+_No result is committed for this table yet._
+<!-- /bench:ablation-pruning -->
+
+### Ablation: optimizer rules
+
+<!-- bench:ablation-rules -->
+_No result is committed for this table yet._
+<!-- /bench:ablation-rules -->
+
+### Cost of spilling
+
+<!-- bench:spill -->
+_No result is committed for this table yet._
+<!-- /bench:spill -->

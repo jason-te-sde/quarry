@@ -361,6 +361,52 @@ jobs:
       - name: Build with the flaw and run the tests that must catch it
         run: bash scripts/run-flaws.sh ${{ matrix.flaw }}
 
+  # The benchmark harness on the SF0.01 test data: it must run to the end and write a result with
+  # every field, the tests of the harness must pass, and the numbers in the README and the docs must
+  # be the ones the committed results produce. No timing is asserted.
+  bench-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 gcc-14
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
+          key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Build quarry
+        run: |
+          cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DQUARRY_BUILD_TESTS=OFF
+          cmake --build build/ci --target quarry
+
+      - name: Tests of the harness
+        env:
+          QUARRY_BUILD_DIR: build/ci
+        run: uv run --locked python -m unittest discover -s bench -v
+
+      - name: Smoke run
+        run: uv run --locked bench/run_bench.py --suite smoke --data tests/data/tpch-sf0.01 --build-dir build/ci --no-build
+
+      - name: Numbers in the README and the docs
+        run: bash scripts/check-readme-numbers.sh
+
   # The macOS job runs only once the repository is public: macOS runners are metered while it is
   # private.
   build-test-macos:
