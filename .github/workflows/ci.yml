@@ -1,0 +1,505 @@
+name: ci
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+  # Started by hand from the Actions page or `gh workflow run ci.yml --ref main`. A re-run of an
+  # earlier run keeps that run's event payload, in which a repository that was private then is still
+  # private; a new dispatch reads the repository as it is now. RELEASING.md says when to use it.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ARROW_VERSION: "26.0.1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      # The whole history, so that check-hygiene.sh scans every commit message.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build clang-18 clang-tidy-18 clang-format-18
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-clang-18
+          key: arrow-${{ env.ARROW_VERSION }}-clang-18-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: bash scripts/build_arrow.sh
+
+      - name: clang-format
+        run: git ls-files -z -- '*.h' '*.cc' | xargs -0 -r clang-format-18 --dry-run --Werror
+
+      - name: Layering
+        run: bash scripts/check-layering.sh
+
+      - name: Hygiene
+        run: bash scripts/check-hygiene.sh
+
+      - name: Hygiene script test
+        run: bash tests/scripts/hygiene_test.sh
+
+      - name: Layering script test
+        run: bash tests/scripts/layering_test.sh
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: >
+          cmake -S . -B build/lint -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DQUARRY_BUILD_TESTS=OFF
+
+      - name: clang-tidy
+        run: >
+          git ls-files -z -- 'src/*.cc' 'tools/*.cc'
+          | xargs -0 -r clang-tidy-18 -p build/lint --quiet -warnings-as-errors='*'
+
+  build-test:
+    name: build-test (${{ matrix.compiler }}, ${{ matrix.build_type }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc-14, clang-18]
+        build_type: [Debug, Release]
+    env:
+      COMPILER: ${{ matrix.compiler }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          case "$COMPILER" in
+            gcc-*)
+              package="g++-${COMPILER#gcc-}"
+              echo "CC=$COMPILER" >> "$GITHUB_ENV"
+              echo "CXX=g++-${COMPILER#gcc-}" >> "$GITHUB_ENV"
+              ;;
+            clang-*)
+              package="$COMPILER"
+              echo "CC=$COMPILER" >> "$GITHUB_ENV"
+              echo "CXX=clang++-${COMPILER#clang-}" >> "$GITHUB_ENV"
+              ;;
+          esac
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build "$package"
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-${{ matrix.compiler }}
+          key: arrow-${{ env.ARROW_VERSION }}-${{ matrix.compiler }}-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Configure
+        run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build/ci
+
+      # The compiled half of the arrow::compute ban: no object of quarry's own may reference it.
+      - name: Check the objects for arrow::compute
+        run: bash scripts/check-objects.sh build/ci
+
+      - name: Test
+        run: ctest --test-dir build/ci --output-on-failure --no-tests=error
+
+  # Line coverage of src/ and tools/ by the whole test suite, GCC instrumentation, read by gcovr. The
+  # job fails below 90% of the lines.
+  coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 gcc-14 pipx
+          pipx install gcovr==8.3
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
+          key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Configure
+        run: cmake --preset coverage
+
+      - name: Build
+        run: cmake --build build/coverage
+
+      - name: Test
+        run: ctest --test-dir build/coverage --output-on-failure --no-tests=error
+
+      - name: Coverage report
+        run: |
+          gcovr --root . --filter 'src/' --filter 'tools/' --gcov-executable gcov-14 \
+            --object-directory build/coverage --print-summary --fail-under-line 90 \
+            --txt build/coverage/coverage.txt --html-details build/coverage/coverage.html
+          tail -n 5 build/coverage/coverage.txt
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: build/coverage/coverage.*
+          if-no-files-found: ignore
+
+  # The whole test suite under AddressSanitizer and UndefinedBehaviorSanitizer (Clang). Any report
+  # fails the test that caused it, because the build uses -fno-sanitize-recover=all.
+  sanitize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CC: clang-18
+      CXX: clang++-18
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build clang-18 libclang-rt-18-dev
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-clang-18
+          key: arrow-${{ env.ARROW_VERSION }}-clang-18-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Configure
+        run: cmake --preset asan
+
+      - name: Build
+        run: cmake --build build/asan
+
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: ctest --test-dir build/asan --output-on-failure --no-tests=error
+
+  # libFuzzer, 60 seconds per target, with AddressSanitizer and UBSan. A crash, a sanitizer report or
+  # a stack overflow fails the job and uploads the input that caused it.
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build clang-18 libclang-rt-18-dev
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-clang-18
+          key: arrow-${{ env.ARROW_VERSION }}-clang-18-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: bash scripts/build_arrow.sh
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: cmake --preset fuzz
+
+      - name: Build the fuzz targets
+        run: cmake --build build/fuzz --target fuzz_parser fuzz_query
+
+      - name: Fuzz the parser
+        run: |
+          mkdir -p build/fuzz/corpus-parser
+          cp tests/tpch/queries/*.sql build/fuzz/corpus-parser/
+          build/fuzz/fuzz/fuzz_parser build/fuzz/corpus-parser -max_total_time=60 -max_len=65536 \
+            -artifact_prefix=build/fuzz/crash-
+
+      # Bytes become a query over two fixed tables and run on an engine with chosen options.
+      - name: Fuzz the engine
+        run: |
+          mkdir -p build/fuzz/corpus-query
+          build/fuzz/fuzz/fuzz_query build/fuzz/corpus-query -max_total_time=60 -max_len=512 \
+            -artifact_prefix=build/fuzz/crash-
+
+      - name: Keep the failing input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash
+          path: build/fuzz/crash-*
+          if-no-files-found: ignore
+
+  # Seeded random tables and queries run on quarry and on DuckDB (pinned in uv.lock); the results
+  # must match. The generator's own tests run first: they fail when a grammar feature is starved.
+  differential:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 gcc-14
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
+          key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Build quarry
+        run: |
+          cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DQUARRY_BUILD_TESTS=OFF
+          cmake --build build/ci --target quarry
+
+      - name: Tests of the comparator and the generator
+        run: uv run --locked python -m unittest discover -s tests/differential -v
+
+      - name: 300 seeds
+        run: uv run --locked tests/differential/run.py --quarry build/ci/tools/quarry --seeds 0:300
+
+  # Every deliberate flaw must turn the suite red: scripts/run-flaws.sh builds quarry with one flaw
+  # and succeeds only when the tests that are meant to catch it fail.
+  flaws:
+    name: flaws (${{ matrix.flaw }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        flaw:
+          - selection_off_by_one
+          - null_as_false
+          - decimal_scale_slip
+          - join_order_drops_predicate
+          - drop_hash_collisions
+          - prune_wrong_bound
+          - spill_drops_last_batch
+          - spill_retains_rows
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 gcc-14
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
+          key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Build with the flaw and run the tests that must catch it
+        run: bash scripts/run-flaws.sh ${{ matrix.flaw }}
+
+  # The benchmark harness on the SF0.01 test data: it must run to the end and write a result with
+  # every field, the tests of the harness must pass, and the numbers in the README and the docs must
+  # be the ones the committed results produce. No timing is asserted.
+  bench-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 gcc-14
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
+          key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Build quarry
+        run: |
+          cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DQUARRY_BUILD_TESTS=OFF
+          cmake --build build/ci --target quarry
+
+      - name: Tests of the harness
+        env:
+          QUARRY_BUILD_DIR: build/ci
+        run: uv run --locked python -m unittest discover -s bench -v
+
+      - name: Smoke run
+        run: uv run --locked bench/run_bench.py --suite smoke --data tests/data/tpch-sf0.01 --build-dir build/ci --no-build
+
+      - name: Numbers in the README and the docs
+        run: bash scripts/check-readme-numbers.sh
+
+  # What a newcomer does, on a checkout that holds nothing but the commit: every command block that
+  # the README marks `<!-- run -->` is run by scripts/run-readme-blocks.sh, after Arrow is built by
+  # scripts/build_arrow.sh. The checkout is a fresh clone into an empty workspace, so a file that was
+  # never committed, or a build step that only works on a developer's machine, fails here. The Arrow
+  # build is cached the way the other jobs cache it; the README's own build and run steps are not.
+  clean-clone:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 gcc-14
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
+          key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Run the commands of the README
+        run: bash scripts/run-readme-blocks.sh
+
+  # The macOS job runs only once the repository is public: macOS runners are metered while it is
+  # private.
+  build-test-macos:
+    if: github.event.repository.private == false
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: brew install ninja
+
+      # The runner's CMake 4.5 rejects the bundled Boost 1.92 that Arrow builds (libs/locale calls
+      # source_group(TREE) with a prefix that CMake 4.5 checks and 4.4 does not). The job pins the
+      # CMake it was developed with, from the PyPI wheel; Arrow itself is still built from source.
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Pin CMake
+        run: |
+          uv tool install cmake==4.4.3
+          echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
+
+      - name: Show the toolchain
+        run: |
+          cmake --version
+          c++ --version
+
+      - name: Detect the compiler id
+        run: |
+          major="$(c++ --version | head -n 1 | sed -E 's/.*version ([0-9]+).*/\1/')"
+          echo "COMPILER_ID=appleclang-$major" >> "$GITHUB_ENV"
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-${{ env.COMPILER_ID }}
+          key: arrow-${{ env.ARROW_VERSION }}-${{ env.COMPILER_ID }}-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Configure
+        run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/ci
+
+      # The compiled half of the arrow::compute ban: no object of quarry's own may reference it.
+      - name: Check the objects for arrow::compute
+        run: bash scripts/check-objects.sh build/ci
+
+      - name: Test
+        run: ctest --test-dir build/ci --output-on-failure --no-tests=error

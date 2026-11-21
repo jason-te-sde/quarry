@@ -1,5 +1,4 @@
 build/
 bench/data/
 .venv/
-.superpowers/
 __pycache__/

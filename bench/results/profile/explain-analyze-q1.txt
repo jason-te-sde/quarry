@@ -1,0 +1,5 @@
+Sort #0 [#0 ASC NULLS LAST, #1 ASC NULLS LAST] est=180036 rows=4 batches=1 time=0.042ms peak=440B
+  Project #1 [#0 AS l_returnflag, #1 AS l_linestatus, #2 AS sum_qty, #3 AS sum_base_price, #4 AS sum_disc_price, #5 AS sum_charge, #6 AS avg_qty, #7 AS avg_price, #8 AS avg_disc, #9 AS count_order] est=180036 rows=4 batches=1 time=0.003ms peak=0B
+    HashAggregate #2 [groups=[#4, #5]; aggs=[SUM(#0) -> DECIMAL(38,2), SUM(#1) -> DECIMAL(38,2), SUM((#1 * (1.00 - CAST(#2 AS DECIMAL(16,2))))) -> DECIMAL(38,4), SUM(((#1 * (1.00 - CAST(#2 AS DECIMAL(16,2)))) * (1.00 + CAST(#3 AS DECIMAL(16,2))))) -> DECIMAL(38,6), AVG(#0) -> DOUBLE, AVG(#1) -> DOUBLE, AVG(#2) -> DOUBLE, COUNT(*) -> BIGINT]] est=180036 rows=4 batches=1 time=397.181ms peak=1.2KiB
+      Scan #3 [lineitem; cols=l_quantity,l_extendedprice,l_discount,l_tax,l_returnflag,l_linestatus,l_shipdate; filter=(#6 <= DATE '1998-09-02'); prune=(#6 <= DATE '1998-09-02')] est=1800365 rows=5916591 batches=2933 time=246.742ms peak=0B buffer=9.1MiB
+pool_peak=132.9KiB scan_pool_peak=19.0MiB

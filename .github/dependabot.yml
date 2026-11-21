@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # The actions that the workflows use. The Python tools are not listed on purpose: uv.lock pins the
+  # DuckDB that every expected result and every measurement is compared with, so a new version of it
+  # is a decision with consequences for the committed answers and results, not an automatic update.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

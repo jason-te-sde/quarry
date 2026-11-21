@@ -1,0 +1,11 @@
+[project]
+name = "quarry"
+# Not the release version. quarry is released from CMakeLists.txt (see RELEASING.md); this project
+# only describes the Python tooling and is never published.
+version = "0.0.0"
+description = "Tooling for quarry: test data, DuckDB answers, differential tests and benchmarks"
+requires-python = ">=3.11"
+dependencies = [
+    "duckdb>=2.0.1",
+    "pyarrow>=26.0.1",
+]

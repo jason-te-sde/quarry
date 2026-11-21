@@ -1,0 +1,8 @@
+TopN #0 [n=10; keys=#1 DESC NULLS LAST, #2 ASC NULLS LAST] est=10
+  Project #1 [#0 AS l_orderkey, #3 AS revenue, #1 AS o_orderdate, #2 AS o_shippriority] est=54
+    HashAggregate #2 [groups=[#0, #6, #7]; aggs=[SUM((#1 * (1.00 - CAST(#2 AS DECIMAL(16,2))))) -> DECIMAL(38,4)]] est=54
+      HashJoin #3 [probe_keys=#0; build_keys=#0] est=542
+        Scan #4 [lineitem; cols=l_orderkey,l_extendedprice,l_discount,l_shipdate; filter=(#3 > DATE '1995-03-15'); prune=(#3 > DATE '1995-03-15')] est=18053
+        HashJoin #5 [probe_keys=#1; build_keys=#0] est=450
+          Scan #6 [orders; cols=o_orderkey,o_custkey,o_orderdate,o_shippriority; filter=(#2 < DATE '1995-03-15'); prune=(#2 < DATE '1995-03-15')] est=4500
+          Scan #7 [customer; cols=c_custkey,c_mktsegment; filter=(#1 = 'BUILDING'); prune=(#1 = 'BUILDING')] est=150

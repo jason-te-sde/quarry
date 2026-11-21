@@ -1,0 +1,62 @@
+# Syntax errors: the position is the offending token, 1-based line and column.
+
+error syntax 1:8
+SELECT FROM region
+
+error syntax 1:19 unexpected end of input
+SELECT r_name FROM
+
+error syntax 1:8 unterminated string literal
+SELECT 'abc FROM region
+
+error syntax 1:8 unterminated quoted identifier
+SELECT "abc FROM region
+
+error syntax 2:8
+SELECT r_name
+FROM   WHERE
+
+error syntax 1:20 division is not supported
+SELECT r_regionkey / 2 FROM region
+
+error syntax 1:8 SELECT * is not supported
+SELECT * FROM region
+
+error syntax 1:8 DISTINCT is not supported
+SELECT DISTINCT r_name FROM region
+
+error syntax 1:27 LEFT is not supported
+SELECT r_name FROM region LEFT JOIN nation ON 1 = 1
+
+error syntax 1:40 LIKE is not supported
+SELECT r_name FROM region WHERE r_name LIKE 'A%'
+
+error syntax 1:27 UNION is not supported
+SELECT r_name FROM region UNION SELECT n_name FROM nation
+
+error syntax 1:35 OFFSET is not supported
+SELECT r_name FROM region LIMIT 1 OFFSET 1
+
+error syntax 1:9 subqueries are not supported
+SELECT (SELECT 1) FROM region
+
+error syntax 1:33 expected an integer
+SELECT r_name FROM region LIMIT 'x'
+
+error syntax 1:49 expected FIRST or LAST
+SELECT r_name FROM region ORDER BY r_name NULLS SOMETIMES
+
+error syntax 1:8 invalid numeric literal
+SELECT 1e3 FROM region
+
+error syntax 1:8 unexpected character '#'
+SELECT # FROM region
+
+error syntax 1:1 expected SELECT
+UPDATE region SET r_name = 'x'
+
+error syntax 1:28 expected end of input
+SELECT r_name FROM region; SELECT 1
+
+error syntax 1:41 expected DAY, MONTH or YEAR
+SELECT DATE '1994-01-01' + INTERVAL '1' WEEK FROM region

@@ -1,0 +1,9 @@
+TopN #0 [n=10; keys=#1 DESC NULLS LAST, #2 ASC NULLS LAST] est=10 rows=10 batches=1 time=0.236ms peak=128.4KiB
+  Project #1 [#0 AS l_orderkey, #3 AS revenue, #1 AS o_orderdate, #2 AS o_shippriority] est=5401 rows=11620 batches=6 time=0.005ms peak=0B
+    HashAggregate #2 [groups=[#0, #6, #7]; aggs=[SUM((#1 * (1.00 - CAST(#2 AS DECIMAL(16,2))))) -> DECIMAL(38,4)]] est=5401 rows=11620 batches=6 time=19.012ms peak=1.2MiB
+      HashJoin #3 [probe_keys=#0; build_keys=#0] est=54011 rows=30519 batches=2862 time=103.455ms peak=21.4MiB
+        Scan #4 [lineitem; cols=l_orderkey,l_extendedprice,l_discount,l_shipdate; filter=(#3 > DATE '1995-03-15'); prune=(#3 > DATE '1995-03-15')] est=1800365 rows=3241776 batches=2933 time=121.175ms peak=0B buffer=5.2MiB
+        HashJoin #5 [probe_keys=#1; build_keys=#0] est=45000 rows=147126 batches=735 time=34.499ms peak=2.5MiB
+          Scan #6 [orders; cols=o_orderkey,o_custkey,o_orderdate,o_shippriority; filter=(#2 < DATE '1995-03-15'); prune=(#2 < DATE '1995-03-15')] est=450000 rows=727305 batches=735 time=38.294ms peak=0B buffer=2.8MiB
+          Scan #7 [customer; cols=c_custkey,c_mktsegment; filter=(#1 = 'BUILDING'); prune=(#1 = 'BUILDING')] est=15000 rows=30142 batches=74 time=4.349ms peak=0B buffer=2.5MiB
+pool_peak=12.5MiB scan_pool_peak=11.9MiB
