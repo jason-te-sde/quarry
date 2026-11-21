@@ -140,6 +140,14 @@ int64_t BufferBytes(const arrow::Array& array) {
 
 }  // namespace
 
+arrow::Result<std::shared_ptr<arrow::Array>> SingleChunk(
+    const std::shared_ptr<arrow::ChunkedArray>& column, const std::string& name) {
+  if (column->num_chunks() == 1) return column->chunk(0);
+  if (column->num_chunks() == 0) return arrow::MakeEmptyArray(column->type());
+  return arrow::Status::Invalid("column ", name, " has ", column->num_chunks(),
+                                " chunks in one row group and cannot be read as one array");
+}
+
 struct ScanOperator::FileState {
   std::filesystem::path path;
   ParquetFileInfo info;
@@ -255,12 +263,11 @@ arrow::Result<bool> ScanOperator::LoadNextRowGroup() {
     int64_t buffer_bytes = 0;
     for (size_t i = 0; i < node_.columns.size(); ++i) {
       const std::shared_ptr<arrow::ChunkedArray>& chunked = table->column(static_cast<int>(i));
-      std::shared_ptr<arrow::Array> array;
-      if (chunked->num_chunks() == 1) {
-        array = chunked->chunk(0);
-      } else {
-        ARROW_ASSIGN_OR_RAISE(array, arrow::MakeEmptyArray(chunked->type(), ScanPool()));
+      auto single = SingleChunk(chunked, node_.columns[i].name);
+      if (!single.ok()) {
+        return single.status().WithMessage(file.path.string() + ": " + single.status().message());
       }
+      std::shared_ptr<arrow::Array> array = std::move(*single);
       const LogicalType& type = node_.columns[i].type;
       buffer_bytes += BufferBytes(*array);
       if (type.is_decimal64() && array->type_id() == arrow::Type::DECIMAL128) {

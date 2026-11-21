@@ -23,6 +23,12 @@ struct ScanReport {
   int columns_decoded = 0;
 };
 
+// The one array of a column that CombineChunks has joined. A column that is still in several chunks
+// (a string column that holds more than 2 GiB in one row group does not fit one array) is an
+// error, not an empty array: the row count of the group would no longer match it.
+arrow::Result<std::shared_ptr<arrow::Array>> SingleChunk(
+    const std::shared_ptr<arrow::ChunkedArray>& column, const std::string& name);
+
 // Reads the Parquet files of a PhysicalScan one row group at a time, skipping the row groups that
 // the prune conjuncts refute, decoding only the columns the scan outputs, converting DECIMAL
 // columns of precision <= 18 from the reader's decimal128 to decimal64, and applying the scan's

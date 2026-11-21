@@ -157,6 +157,27 @@ TEST(ScanTest, RowGroupPruningUsesTheStatisticsOfTheFilteredColumnAfterANestedCo
   EXPECT_EQ(on_y.rows.size(), 10u);
 }
 
+TEST(ScanTest, AColumnLeftInSeveralChunksIsAnErrorNotAnEmptyArray) {
+  auto make = [](std::vector<int64_t> values) {
+    arrow::Int64Builder builder;
+    EXPECT_TRUE(builder.AppendValues(values).ok());
+    std::shared_ptr<arrow::Array> out;
+    EXPECT_TRUE(builder.Finish(&out).ok());
+    return out;
+  };
+  const auto one = std::make_shared<arrow::ChunkedArray>(make({1, 2, 3}));
+  auto ok = SingleChunk(one, "x");
+  ASSERT_TRUE(ok.ok());
+  EXPECT_EQ((*ok)->length(), 3);
+
+  const auto two = std::make_shared<arrow::ChunkedArray>(
+      arrow::ArrayVector{make({1, 2}), make({3})});
+  auto bad = SingleChunk(two, "x");
+  ASSERT_FALSE(bad.ok());
+  EXPECT_NE(bad.status().message().find("column x has 2 chunks"), std::string::npos)
+      << bad.status().message();
+}
+
 TEST(ScanTest, TheScanAppliesItsPredicate) {
   const ScanRun run = RunScan("SELECT id FROM events WHERE id BETWEEN 5 AND 7", Events());
   EXPECT_EQ(run.rows, (std::vector<std::string>{"5", "6", "7"}));
