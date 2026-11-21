@@ -44,7 +44,7 @@ jobs:
       # A tag can read the caches of the default branch.
       - name: Restore Arrow
         id: arrow-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/opt/arrow-26.0.1-gcc-14
           key: arrow-26.0.1-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}

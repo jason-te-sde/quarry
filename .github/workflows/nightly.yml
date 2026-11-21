@@ -53,7 +53,7 @@ jobs:
 
       - name: Restore Arrow
         id: arrow-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
           key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}

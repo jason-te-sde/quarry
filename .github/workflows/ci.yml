@@ -36,7 +36,7 @@ jobs:
 
       - name: Restore Arrow
         id: arrow-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-clang-18
           key: arrow-${{ env.ARROW_VERSION }}-clang-18-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
@@ -109,7 +109,7 @@ jobs:
 
       - name: Restore Arrow
         id: arrow-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-${{ matrix.compiler }}
           key: arrow-${{ env.ARROW_VERSION }}-${{ matrix.compiler }}-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
@@ -150,7 +150,7 @@ jobs:
 
       - name: Restore Arrow
         id: arrow-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
           key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
@@ -201,7 +201,7 @@ jobs:
 
       - name: Restore Arrow
         id: arrow-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-clang-18
           key: arrow-${{ env.ARROW_VERSION }}-clang-18-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
@@ -237,7 +237,7 @@ jobs:
 
       - name: Restore Arrow
         id: arrow-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-clang-18
           key: arrow-${{ env.ARROW_VERSION }}-clang-18-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
@@ -300,7 +300,7 @@ jobs:
 
       - name: Restore Arrow
         id: arrow-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
           key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
@@ -353,7 +353,7 @@ jobs:
 
       - name: Restore Arrow
         id: arrow-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
           key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
@@ -386,7 +386,7 @@ jobs:
 
       - name: Restore Arrow
         id: arrow-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
           key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
@@ -434,7 +434,7 @@ jobs:
 
       - name: Restore Arrow
         id: arrow-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
           key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
@@ -482,7 +482,7 @@ jobs:
 
       - name: Restore Arrow
         id: arrow-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-${{ env.COMPILER_ID }}
           key: arrow-${{ env.ARROW_VERSION }}-${{ env.COMPILER_ID }}-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
