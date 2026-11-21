@@ -81,11 +81,42 @@ class RenderTablesTest(unittest.TestCase):
         document = main_result(25.0)
         document["cells"][0] = {
             "engine": "quarry", "config": "default", "query": "q1", "dataset": "default", "group": "engines",
-            "status": "crashed", "error": "died", "load_flag": False,
+            "status": "crashed", "error": "died", "load_flag": None,
         }
         self.result("main-20260101T000000Z.json", document)
         self.assertEqual(self.run_tables(), 0)
         self.assertIn("| Q1 | crashed |", self.readme.read_text())
+
+    def test_the_load_note_lists_only_the_cells_of_its_own_table_and_names_the_dataset(self):
+        def flagged_cell(group, dataset, query, flag):
+            return cell("quarry", "default", query, 10.0, group=group, dataset=dataset, load_flag=flag)
+
+        document = {
+            "cells": [
+                flagged_cell("batch", "default", "q1", True),
+                flagged_cell("pruning", "sorted", "q6", True),
+                flagged_cell("pruning", "default", "q1", False),
+                flagged_cell("rules", "default", "q3", True),
+            ]
+        }
+        pruning = render_tables.flagged(document, "pruning")
+        self.assertIn("quarry default Q6 (sorted data)", pruning)
+        self.assertNotIn("Q1", pruning)
+        self.assertNotIn("Q3", pruning)
+        batch = render_tables.flagged(document, "batch")
+        self.assertIn("quarry default Q1 (default data)", batch)
+        self.assertNotIn("Q6", batch)
+        self.assertIn("stayed at or below", render_tables.flagged(document, "spill"))
+
+    def test_a_cell_with_a_null_load_flag_is_not_flagged_and_is_said_to_have_no_load_figure(self):
+        timed_out = {
+            "engine": "quarry", "config": "batch_size=1", "query": "q5", "dataset": "default", "group": "batch",
+            "status": "timeout", "error": "killed", "load_flag": None,
+        }
+        text = render_tables.flagged({"cells": [timed_out, cell("quarry", "default", "q1", 5.0, group="batch")]}, "batch")
+        self.assertIn("stayed at or below", text)
+        self.assertNotIn("Q5", text)
+        self.assertIn("no load figure", text)
 
     def test_an_unknown_table_is_an_error(self):
         self.readme.write_text("<!-- bench:nope -->\n<!-- /bench:nope -->\n")

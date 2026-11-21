@@ -78,15 +78,22 @@ def source_line(path, document):
     )
 
 
-def flagged(document):
-    cells = [
-        f"{c['engine']} {c['config']} {QUERY_LABEL[c['query']]}"
-        for c in document["cells"]
-        if c.get("load_flag")
+def flagged(document, group):
+    """The load-average sentence under a table: the flagged cells of that table's group only, each
+    with its dataset. A cell with a null `load_flag` never ran a measurement and is not flagged."""
+    cells = [c for c in document["cells"] if c["group"] == group]
+    names = [
+        f"{c['engine']} {c['config']} {QUERY_LABEL[c['query']]} ({c['dataset']} data)"
+        for c in cells
+        if c.get("load_flag") is True
     ]
-    if not cells:
-        return "The 1-minute load average stayed at or below 1.5 before every run of every cell."
-    return "Cells that ran with a 1-minute load average above 1.5 after the wait: " + ", ".join(cells) + "."
+    if names:
+        text = "Cells that ran with a 1-minute load average above 1.5 after the wait: " + ", ".join(names) + "."
+    else:
+        text = "The 1-minute load average stayed at or below 1.5 before every run of every measured cell."
+    if any(c.get("load_flag") is None for c in cells):
+        text += " A cell that timed out or crashed has no load figure."
+    return text
 
 
 def render_environment(root):
@@ -132,7 +139,7 @@ def render_main(root):
             "A ratio above 1.00 means quarry is slower than single-threaded DuckDB.",
             "",
             source_line(path, d),
-            flagged(d),
+            flagged(d, "engines"),
         ]
     )
 
@@ -187,7 +194,7 @@ def render_batch(root):
             + [stat(pick(d["cells"], group="batch", query=q, config=f"batch_size={s}")) for s in sizes]
         )
     return "\n".join(
-        [table(["Query"] + [f"batch {s}" for s in sizes], rows), "", source_line(path, d), flagged(d)]
+        [table(["Query"] + [f"batch {s}" for s in sizes], rows), "", source_line(path, d), flagged(d, "batch")]
     )
 
 
@@ -207,7 +214,7 @@ def render_pruning(root):
             duck = pick(d["cells"], group="pruning", query=q, dataset=dataset, engine="duckdb")
             rows.append([label, QUERY_LABEL[q], stat(on), stat(off), stat(duck) if duck else "not run"])
     header = ["lineitem", "Query", "quarry", "quarry, prune_row_groups off", "DuckDB threads=1"]
-    return "\n".join([table(header, rows), "", source_line(path, d), flagged(d)])
+    return "\n".join([table(header, rows), "", source_line(path, d), flagged(d, "pruning")])
 
 
 def render_rules(root):
@@ -223,7 +230,7 @@ def render_rules(root):
             rows.append([f"`{rule}`", QUERY_LABEL[q], stat(on), stat(off)])
     return "\n".join(
         [table(["Rule switched off", "Query", "quarry, all rules", "quarry, rule off"], rows), "",
-         source_line(path, d), flagged(d)]
+         source_line(path, d), flagged(d, "rules")]
     )
 
 
@@ -256,7 +263,7 @@ def render_spill(root):
             "operator-state peak (docs/design/0006-memory-and-spill.md). A refused cell is the result of that cell.",
             "",
             source_line(path, d),
-            flagged(d),
+            flagged(d, "spill"),
         ]
     )
 
