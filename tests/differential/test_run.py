@@ -69,7 +69,7 @@ class UnfilteredSizeTest(unittest.TestCase):
 
         options = gen_query.Options(batch_size=7, memory_limit=None, disabled_rule=disabled_rule)
         query = gen_query.Query(
-            0, 0, "SELECT 1", "SELECT COUNT(*) filtered", False, frozenset(), options, [], "SELECT COUNT(*) unfiltered"
+            0, 0, "SELECT 1", "SELECT COUNT(*) filtered", False, frozenset(), options, [], "unfiltered"
         )
         stats = run.Stats()
         quarry_calls = []

@@ -158,8 +158,11 @@ def check_query(quarry, con, data_dir, query, stats, max_rows):
     # With push_filters off the joins run before the WHERE: a filter that keeps no row can still sit
     # on top of hundreds of millions of join rows (seed 4776, query 4: 236 million rows, which batch
     # size 7 cannot get through in the timeout). Bound that work too.
-    if query.options.disabled_rule == "push_filters" and query.from_count_sql:
-        kind, unfiltered = run_duckdb(con, query.from_count_sql)
+    # The count stops at max_rows + 1 rows, so that counting a join of billions of rows is not itself
+    # the slow part.
+    if query.options.disabled_rule == "push_filters" and query.from_sql:
+        capped = f"SELECT COUNT(*) FROM (SELECT 1 FROM {query.from_sql} LIMIT {max_rows + 1})"
+        kind, unfiltered = run_duckdb(con, capped)
         if kind == "ok" and unfiltered.rows[0][0] > max_rows:
             stats.skipped_big += 1
             return []
