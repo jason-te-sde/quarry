@@ -117,7 +117,10 @@ Found before this release and not fixed in it; each is small, and none returns a
   release everything); an empty `VARCHAR` offsets buffer is dereferenced where operators never pass one;
   `ValueOrDie` is used when a result string passes 2 GiB; `AddDirectory` is not atomic and registers a
   directory with no Parquet file silently; destructors swallow the errors of removing spill files.
-- **Gaps in the tests.** The hygiene test does not pin every fail-closed branch; there is no test of a
+- **Gaps in the tests.** Nothing fails if the engine stops forgetting a `Cancel()` that came before
+  `Execute()`, or stops checking the cancel flag during planning (the fix is in `Engine::Execute` and
+  the command line's signal handler, and no test pins it); the hygiene test does not pin every
+  fail-closed branch; there is no test of a
   nested join at depth 3, of Top-N spilling behaviour, of file descriptors, of a `DECIMAL` comparison
   at 2^63 and above, or of `AddInterval` across centuries; the differential test has no floor on the
   number of non-empty compared results; unreadable-file cases skip when run as root; the object check
