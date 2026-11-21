@@ -450,7 +450,7 @@ jobs:
   # private.
   build-test-macos:
     if: github.event.repository.private == false
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
