@@ -215,7 +215,7 @@ unlimited aggregate's pool peak is above 16 MiB, which fails if the state is all
   although it would fit alone. The TPC-H plans are not all right-deep: in Q5's shipped plan
   (`bench/results/profile/explain-analyze-q5.txt`) `HashJoin #6` is the probe side of `HashJoin #5`,
   which is the build side of `HashJoin #3`, so while #3 builds, the tables of #5 (peak
-  <!-- n:ea.q5.5.peak -->19.6MiB<!-- /n -->) and #6 (<!-- n:ea.q5.6.peak -->204.6KiB<!-- /n -->) are live too. Q5 works at a small limit because the table that is
+  <!-- n:ea.q5.5.peak -->21.9MiB<!-- /n -->) and #6 (<!-- n:ea.q5.6.peak -->287.0KiB<!-- /n -->) are live too. Q5 works at a small limit because the table that is
   live next to the large one is small. A per-operator share of the budget is the fix, and is not
   done.
 - **Skew fails instead of degrading.** Equal keys cannot be split; the error says so, and

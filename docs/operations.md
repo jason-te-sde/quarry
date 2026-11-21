@@ -30,8 +30,8 @@ What to count on, in three parts:
   the code and not measured. For an aggregate there is no copy.
 
 - A join or aggregation that does not fit **spills** and is slower, not wrong: the answer is the
-  same at every limit. Q5 at scale factor 1 takes <!-- n:spill.q5.16MB.ms -->7,375<!-- /n --> ms at `--memory-limit 16MB` against
-  <!-- n:spill.q5.unlimited.ms -->589.5<!-- /n --> ms unlimited (the README's spill table).
+  same at every limit. Q5 at scale factor 1 takes <!-- n:spill.q5.16MB.ms -->8,124<!-- /n --> ms at `--memory-limit 16MB` against
+  <!-- n:spill.q5.unlimited.ms -->587.8<!-- /n --> ms unlimited (the README's spill table).
 - A **sort** over the limit fails. Give a sort enough room for its whole input (rows times row width,
   plus 4 bytes a row), or add a `LIMIT` so that the plan uses Top-N.
 - Run `--explain-analyze` at a candidate limit and read `peak=` and `spilled=` per operator: an

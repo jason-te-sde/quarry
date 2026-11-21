@@ -155,6 +155,29 @@ results are kept under `bench/results/before-review-fixes/` (and their profiles 
 `bench/results/profile/before-review-fixes/`) and are labelled "before the fixes of the whole-branch
 review" wherever they are cited.
 
+What the fixes did to the numbers, from the two `main` results (the ratio is quarry's median over
+single-threaded DuckDB's in the same file):
+
+<!-- bench:fix-wave -->
+| Query | quarry before (ms) | quarry after (ms) | ratio before | ratio after | quarry time change |
+|---|---|---|---|---|---|
+| Q1 | 608.4 | 608.3 | 4.25 | 4.31 | -0.0% |
+| Q3 | 323.3 | 321.3 | 3.59 | 3.57 | -0.6% |
+| Q5 | 577.1 | 590.5 | 6.09 | 6.29 | +2.3% |
+| Q6 | 344.3 | 342.4 | 6.10 | 6.05 | -0.5% |
+
+Before: `bench/results/before-review-fixes/main-20261121T131055Z.json` (commit `479f7227df54`). After: `bench/results/main-20261121T163719Z.json` (commit `2676a9805ba8`). The ratio is quarry's median over DuckDB's, `threads=1`, in the same result file.
+<!-- /bench:fix-wave -->
+
+The four queries moved by a few percent, which is the run-to-run spread of these files. The cost shows
+where a limit is tight. Q3 at `--memory-limit 16MB` took <!-- n:fixes.before.spill.q3.16MB.ms -->1,610<!-- /n --> ms before and takes <!-- n:spill.q3.16MB.ms -->1,954<!-- /n --> ms now, and Q5 at that limit
+took <!-- n:fixes.before.spill.q5.16MB.ms -->7,375<!-- /n --> ms and takes <!-- n:spill.q5.16MB.ms -->8,124<!-- /n --> ms: a table now pays for the doubled slot array of a rehash before it
+allocates it, counting the old array and the new together, so it spills earlier than it used to. The
+high-cardinality aggregate's operator pool peak without a limit went from <!-- n:fixes.before.spill.agg.unlimited.state -->0<!-- /n --> MiB to
+<!-- n:spill.agg.unlimited.state -->147<!-- /n --> MiB, because its state is now allocated from the pool; its time did not move. The
+`prune_columns` and `order_joins` rows of the ablation, and Q5 with `order_joins` off being faster than
+with it on, are as before.
+
 ## What gets recorded
 
 `uv run bench/run_bench.py --suite {main,ablation,spill,smoke} --data <dir>` writes
@@ -217,14 +240,14 @@ Measured on Apple M2 (8 cores, 16 GB), macOS 26.6.2. quarry: Apple clang version
 <!-- bench:main -->
 | Query | quarry, 1 thread | DuckDB, threads=1 | DuckDB, default (8 threads) | quarry / DuckDB (threads=1) |
 |---|---|---|---|---|
-| Q1 | 608.4 (603.3-609.8) | 143.0 (140.5-144.3) | 33.4 (32.5-33.6) | 4.25 |
-| Q3 | 323.3 (321.6-325.0) | 90.0 (89.7-90.6) | 28.5 (27.5-28.7) | 3.59 |
-| Q5 | 577.1 (575.3-587.4) | 94.7 (94.6-95.7) | 29.4 (28.3-29.8) | 6.09 |
-| Q6 | 344.3 (342.6-348.7) | 56.4 (55.5-57.7) | 15.7 (15.4-15.9) | 6.10 |
+| Q1 | 608.3 (603.3-611.5) | 141.0 (140.7-179.7) | 33.3 (33.2-34.4) | 4.31 |
+| Q3 | 321.3 (318.8-321.4) | 90.0 (89.6-90.1) | 27.9 (27.7-29.4) | 3.57 |
+| Q5 | 590.5 (575.0-610.3) | 93.9 (93.4-94.9) | 29.7 (29.5-30.1) | 6.29 |
+| Q6 | 342.4 (342.0-356.3) | 56.6 (55.7-58.6) | 15.8 (15.5-16.0) | 6.05 |
 
 A ratio above 1.00 means quarry is slower than single-threaded DuckDB.
 
-Source: `bench/results/main-20261121T131055Z.json` (commit `479f7227df54`, 2026-11-21T13:10:55Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+Source: `bench/results/main-20261121T163719Z.json` (commit `2676a9805ba8`, 2026-11-21T16:37:19Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
 The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
 <!-- /bench:main -->
 
@@ -233,14 +256,14 @@ The 1-minute load average stayed at or below 1.5 before every run of every measu
 <!-- bench:memory -->
 | Query | quarry peak RSS | quarry operator pool peak | quarry scan pool peak | DuckDB threads=1 peak RSS | DuckDB default peak RSS | Python + DuckDB idle RSS |
 |---|---|---|---|---|---|---|
-| Q1 | 38 | 0 | 19 | 99 | 212 | 85 |
-| Q3 | 65 | 13 | 12 | 118 | 302 | 86 |
-| Q5 | 114 | 34 | 12 | 127 | 279 | 85 |
-| Q6 | 26 | 0 | 13 | 96 | 180 | 85 |
+| Q1 | 53 | 0 | 19 | 104 | 214 | 86 |
+| Q3 | 63 | 26 | 12 | 116 | 302 | 86 |
+| Q5 | 125 | 56 | 12 | 124 | 279 | 85 |
+| Q6 | 26 | 0 | 13 | 96 | 179 | 86 |
 
 MiB. The DuckDB peaks include the Python interpreter, `duckdb` and `pyarrow`; the idle column is that process's RSS just before its first query and is not subtracted. quarry's two pool peaks are the per-query Arrow pool peaks that `--explain-analyze` prints. The operator pool holds the hash tables' storage (key index, key arena, aggregate states, join chains), sort and build-row buffers, spill buffers and expression temporaries; the scan pool holds the Parquet reader's row-group buffers. Neither includes the result table.
 
-Source: `bench/results/main-20261121T131055Z.json`.
+Source: `bench/results/main-20261121T163719Z.json`.
 <!-- /bench:memory -->
 
 ### Ablation: batch size
@@ -248,13 +271,13 @@ Source: `bench/results/main-20261121T131055Z.json`.
 <!-- bench:ablation-batch -->
 | Query | batch 1 | batch 64 | batch 1024 | batch 2048 | batch 8192 |
 |---|---|---|---|---|---|
-| Q1 | 94,891 (94,363-95,103) | 2,068 (2,059-2,070) | 671.6 (671.0-672.3) | 621.2 (615.0-623.2) | 568.5 (567.9-569.7) |
-| Q3 | 14,232 (14,088-14,375) | 1,125 (1,124-1,131) | 371.1 (369.7-381.8) | 326.9 (325.9-327.3) | 288.5 (287.5-293.6) |
-| Q5 | 22,247 (22,191-22,347) | 4,055 (4,050-4,156) | 733.4 (731.8-742.8) | 588.6 (586.6-597.3) | 477.9 (476.9-481.3) |
-| Q6 | 49,162 (48,881-49,301) | 1,157 (1,156-1,158) | 381.3 (381.1-381.5) | 352.8 (351.6-353.8) | 329.0 (328.8-329.6) |
+| Q1 | 95,075 (94,053-96,064) | 2,052 (2,031-2,058) | 669.0 (668.5-670.1) | 618.5 (615.7-618.9) | 562.7 (552.1-565.8) |
+| Q3 | 13,984 (13,594-14,148) | 1,120 (1,110-1,142) | 361.6 (360.6-363.7) | 321.0 (318.7-323.5) | 281.6 (281.0-284.3) |
+| Q5 | 22,524 (22,374-22,604) | 4,072 (4,041-4,094) | 733.4 (715.6-750.7) | 574.2 (572.5-609.2) | 468.5 (467.3-470.6) |
+| Q6 | 47,436 (44,828-48,205) | 1,151 (1,150-1,153) | 376.8 (372.6-378.1) | 342.4 (341.9-343.6) | 319.7 (319.6-321.3) |
 
-Source: `bench/results/ablation-20261121T131139Z.json` (commit `479f7227df54`, 2026-11-21T13:11:39Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
-Cells that ran with a 1-minute load average above 1.5 after the wait: quarry batch_size=1 Q1 (default data).
+Source: `bench/results/ablation-20261121T164037Z.json` (commit `2676a9805ba8`, 2026-11-21T16:40:37Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+Cells that ran with a 1-minute load average above 1.5 after the wait: quarry batch_size=1 Q1 (default data), quarry batch_size=1 Q3 (default data), quarry batch_size=1 Q6 (default data), quarry batch_size=64 Q1 (default data).
 <!-- /bench:ablation-batch -->
 
 ### Ablation: row-group pruning
@@ -262,12 +285,12 @@ Cells that ran with a 1-minute load average above 1.5 after the wait: quarry bat
 <!-- bench:ablation-pruning -->
 | lineitem | Query | quarry | quarry, prune_row_groups off | DuckDB threads=1 |
 |---|---|---|---|---|
-| sorted by l_shipdate | Q1 | 506.6 (506.2-545.9) | 507.5 (507.0-508.3) | 116.9 (116.6-117.7) |
-| sorted by l_shipdate | Q6 | 60.3 (60.2-60.7) | 321.5 (320.9-322.2) | 11.3 (10.9-11.6) |
-| dbgen order | Q1 | 619.2 (618.4-634.5) | 621.0 (618.4-626.4) | not run |
-| dbgen order | Q6 | 351.5 (350.0-354.2) | 352.8 (351.7-353.2) | not run |
+| sorted by l_shipdate | Q1 | 503.0 (494.9-509.4) | 506.9 (506.5-507.4) | 114.4 (114.1-116.0) |
+| sorted by l_shipdate | Q6 | 58.8 (58.7-59.1) | 313.2 (311.3-316.1) | 11.3 (11.0-11.6) |
+| dbgen order | Q1 | 617.4 (616.8-618.3) | 618.3 (616.8-632.6) | not run |
+| dbgen order | Q6 | 348.3 (341.9-350.0) | 348.1 (343.8-350.1) | not run |
 
-Source: `bench/results/ablation-20261121T131139Z.json` (commit `479f7227df54`, 2026-11-21T13:11:39Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+Source: `bench/results/ablation-20261121T164037Z.json` (commit `2676a9805ba8`, 2026-11-21T16:40:37Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
 The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
 <!-- /bench:ablation-pruning -->
 
@@ -276,14 +299,14 @@ The 1-minute load average stayed at or below 1.5 before every run of every measu
 <!-- bench:ablation-rules -->
 | Rule switched off | Query | quarry, all rules | quarry, rule off |
 |---|---|---|---|
-| `prune_columns` | Q1 | 618.4 (617.9-630.3) | 1,044 (1,043-1,048) |
-| `prune_columns` | Q3 | 319.6 (318.4-320.9) | 1,261 (1,259-1,272) |
-| `prune_columns` | Q5 | 573.2 (572.9-602.5) | 1,704 (1,683-1,708) |
-| `prune_columns` | Q6 | 343.1 (342.4-383.4) | 870.4 (869.1-882.6) |
-| `order_joins` | Q3 | 319.6 (318.4-320.9) | 319.7 (318.8-323.4) |
-| `order_joins` | Q5 | 573.2 (572.9-602.5) | 447.0 (446.2-475.4) |
+| `prune_columns` | Q1 | 619.7 (616.7-635.1) | 1,042 (1,041-1,052) |
+| `prune_columns` | Q3 | 318.2 (318.0-357.2) | 1,266 (1,254-1,268) |
+| `prune_columns` | Q5 | 577.4 (575.0-595.1) | 1,705 (1,689-1,725) |
+| `prune_columns` | Q6 | 347.8 (346.2-349.7) | 868.4 (864.5-882.4) |
+| `order_joins` | Q3 | 318.2 (318.0-357.2) | 319.8 (318.3-320.5) |
+| `order_joins` | Q5 | 577.4 (575.0-595.1) | 448.8 (444.7-450.5) |
 
-Source: `bench/results/ablation-20261121T131139Z.json` (commit `479f7227df54`, 2026-11-21T13:11:39Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+Source: `bench/results/ablation-20261121T164037Z.json` (commit `2676a9805ba8`, 2026-11-21T16:40:37Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
 The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
 <!-- /bench:ablation-rules -->
 
@@ -292,21 +315,21 @@ The 1-minute load average stayed at or below 1.5 before every run of every measu
 <!-- bench:spill -->
 | Query | Memory limit | Time (ms) | Spilled (MiB) | Operator pool peak (MiB) | Peak RSS (MiB) |
 |---|---|---|---|---|---|
-| Q3 | unlimited | 323.2 (322.5-334.0) | 0 | 13 | 65 |
-| Q3 | 256MB | 334.3 (332.7-339.3) | 0 | 13 | 66 |
-| Q3 | 64MB | 334.2 (334.0-334.5) | 0 | 13 | 66 |
-| Q3 | 16MB | 1,610 (1,600-1,612) | 98 | 6 | 45 |
-| Q5 | unlimited | 589.5 (585.2-597.2) | 0 | 34 | 121 |
-| Q5 | 256MB | 596.2 (595.5-603.8) | 0 | 34 | 114 |
-| Q5 | 64MB | 596.0 (594.6-607.4) | 0 | 34 | 115 |
-| Q5 | 16MB | 7,375 (7,366-7,408) | 122 | 11 | 111 |
-| High-cardinality aggregate | unlimited | 302.0 (300.7-307.4) | 0 | 0 | 271 |
-| High-cardinality aggregate | 256MB | 322.0 (321.0-326.1) | 0 | 0 | 265 |
-| High-cardinality aggregate | 64MB | 758.8 (754.7-783.0) | 36 | 0 | 165 |
-| High-cardinality aggregate | 16MB | 725.6 (714.1-751.8) | 36 | 0 | 84 |
+| Q3 | unlimited | 320.5 (319.3-323.4) | 0 | 26 | 78 |
+| Q3 | 256MB | 332.7 (329.6-357.8) | 0 | 28 | 63 |
+| Q3 | 64MB | 334.5 (329.8-370.7) | 0 | 28 | 72 |
+| Q3 | 16MB | 1,954 (1,945-2,038) | 98 | 9 | 45 |
+| Q5 | unlimited | 587.8 (582.5-620.4) | 0 | 56 | 114 |
+| Q5 | 256MB | 588.8 (586.6-598.8) | 0 | 54 | 115 |
+| Q5 | 64MB | 587.5 (584.1-621.8) | 0 | 54 | 115 |
+| Q5 | 16MB | 8,124 (7,980-8,213) | 122 | 16 | 103 |
+| High-cardinality aggregate | unlimited | 318.2 (315.9-323.8) | 0 | 147 | 260 |
+| High-cardinality aggregate | 256MB | 373.0 (340.0-386.3) | 0 | 147 | 264 |
+| High-cardinality aggregate | 64MB | 929.5 (923.0-965.9) | 36 | 41 | 119 |
+| High-cardinality aggregate | 16MB | 927.4 (882.2-940.5) | 36 | 10 | 71 |
 
 The limit bounds operator state, not the Parquet reader's row-group buffers, so peak RSS stays above it. The operator pool peak is what the query's operators allocated through Arrow's memory pool: the hash tables' storage (key index, key arena, aggregate states, join chains), sort and build-row buffers, spill buffers, batches read back from spill files and expression temporaries. It excludes the Parquet reader's row-group buffers (their own pool), the result table, and the strings that MIN and MAX of a VARCHAR hold (docs/design/0006-memory-and-spill.md). A join's build rows are counted once in the pool, although they exist twice while they are concatenated. A refused cell is the result of that cell.
 
-Source: `bench/results/spill-20261121T135405Z.json` (commit `479f7227df54`, 2026-11-21T13:54:05Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
-The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
+Source: `bench/results/spill-20261121T180222Z.json` (commit `2676a9805ba8`, 2026-11-21T18:02:22Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+Cells that ran with a 1-minute load average above 1.5 after the wait: quarry 256MB High-cardinality aggregate (default data), quarry 16MB High-cardinality aggregate (default data).
 <!-- /bench:spill -->

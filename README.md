@@ -10,7 +10,7 @@ threaded, read-only and runs a deliberate subset of SQL ([what is left out, and 
 
 **It is slower than DuckDB.** On the TPC-H-derived queries Q1, Q3, Q5 and Q6 at scale factor 1,
 single-threaded quarry takes a multiple of single-threaded DuckDB's time on every one of them: the
-ratios are Q1 <!-- n:main.q1.ratio -->4.25<!-- /n -->, Q3 <!-- n:main.q3.ratio -->3.59<!-- /n -->, Q5 <!-- n:main.q5.ratio -->6.09<!-- /n --> and Q6 <!-- n:main.q6.ratio -->6.10<!-- /n -->. Q5 was
+ratios are Q1 <!-- n:main.q1.ratio -->4.31<!-- /n -->, Q3 <!-- n:main.q3.ratio -->3.57<!-- /n -->, Q5 <!-- n:main.q5.ratio -->6.29<!-- /n --> and Q6 <!-- n:main.q6.ratio -->6.05<!-- /n -->. Q5 was
 <!-- n:before.main.q5.ratio -->50.40<!-- /n -->x before a fix to the join-size estimate, and its join order is still not the best one. The
 [measured numbers](#measured-numbers) and the [account of where the time goes](#where-the-time-goes)
 are below. Every measured number in this file is rendered from the result files in
@@ -190,20 +190,21 @@ Measured on Apple M2 (8 cores, 16 GB), macOS 26.6.2. quarry: Apple clang version
 <!-- bench:main -->
 | Query | quarry, 1 thread | DuckDB, threads=1 | DuckDB, default (8 threads) | quarry / DuckDB (threads=1) |
 |---|---|---|---|---|
-| Q1 | 608.4 (603.3-609.8) | 143.0 (140.5-144.3) | 33.4 (32.5-33.6) | 4.25 |
-| Q3 | 323.3 (321.6-325.0) | 90.0 (89.7-90.6) | 28.5 (27.5-28.7) | 3.59 |
-| Q5 | 577.1 (575.3-587.4) | 94.7 (94.6-95.7) | 29.4 (28.3-29.8) | 6.09 |
-| Q6 | 344.3 (342.6-348.7) | 56.4 (55.5-57.7) | 15.7 (15.4-15.9) | 6.10 |
+| Q1 | 608.3 (603.3-611.5) | 141.0 (140.7-179.7) | 33.3 (33.2-34.4) | 4.31 |
+| Q3 | 321.3 (318.8-321.4) | 90.0 (89.6-90.1) | 27.9 (27.7-29.4) | 3.57 |
+| Q5 | 590.5 (575.0-610.3) | 93.9 (93.4-94.9) | 29.7 (29.5-30.1) | 6.29 |
+| Q6 | 342.4 (342.0-356.3) | 56.6 (55.7-58.6) | 15.8 (15.5-16.0) | 6.05 |
 
 A ratio above 1.00 means quarry is slower than single-threaded DuckDB.
 
-Source: `bench/results/main-20261121T131055Z.json` (commit `479f7227df54`, 2026-11-21T13:10:55Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+Source: `bench/results/main-20261121T163719Z.json` (commit `2676a9805ba8`, 2026-11-21T16:37:19Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
 The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
 <!-- /bench:main -->
 
 quarry is slower than DuckDB on all four queries even when DuckDB is held to one thread, and further
 behind when DuckDB uses every thread. Peak memory, the effect of batch size and of row-group pruning, and the earlier results
-from before the join-estimate fix (kept under `bench/results/before-join-estimate-fix/`) are in
+from before the join-estimate fix (kept under `bench/results/before-join-estimate-fix/`) and before the fixes of the
+whole-branch review (`bench/results/before-review-fixes/`, with the comparison) are in
 [docs/benchmarks.md](docs/benchmarks.md#results).
 
 What each optimizer rule is worth, with the rule switched off:
@@ -211,14 +212,14 @@ What each optimizer rule is worth, with the rule switched off:
 <!-- bench:ablation-rules -->
 | Rule switched off | Query | quarry, all rules | quarry, rule off |
 |---|---|---|---|
-| `prune_columns` | Q1 | 618.4 (617.9-630.3) | 1,044 (1,043-1,048) |
-| `prune_columns` | Q3 | 319.6 (318.4-320.9) | 1,261 (1,259-1,272) |
-| `prune_columns` | Q5 | 573.2 (572.9-602.5) | 1,704 (1,683-1,708) |
-| `prune_columns` | Q6 | 343.1 (342.4-383.4) | 870.4 (869.1-882.6) |
-| `order_joins` | Q3 | 319.6 (318.4-320.9) | 319.7 (318.8-323.4) |
-| `order_joins` | Q5 | 573.2 (572.9-602.5) | 447.0 (446.2-475.4) |
+| `prune_columns` | Q1 | 619.7 (616.7-635.1) | 1,042 (1,041-1,052) |
+| `prune_columns` | Q3 | 318.2 (318.0-357.2) | 1,266 (1,254-1,268) |
+| `prune_columns` | Q5 | 577.4 (575.0-595.1) | 1,705 (1,689-1,725) |
+| `prune_columns` | Q6 | 347.8 (346.2-349.7) | 868.4 (864.5-882.4) |
+| `order_joins` | Q3 | 318.2 (318.0-357.2) | 319.8 (318.3-320.5) |
+| `order_joins` | Q5 | 577.4 (575.0-595.1) | 448.8 (444.7-450.5) |
 
-Source: `bench/results/ablation-20261121T131139Z.json` (commit `479f7227df54`, 2026-11-21T13:11:39Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+Source: `bench/results/ablation-20261121T164037Z.json` (commit `2676a9805ba8`, 2026-11-21T16:40:37Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
 The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
 <!-- /bench:ablation-rules -->
 
@@ -229,23 +230,23 @@ And the cost of staying inside a memory limit, with the queries whose joins and 
 <!-- bench:spill -->
 | Query | Memory limit | Time (ms) | Spilled (MiB) | Operator pool peak (MiB) | Peak RSS (MiB) |
 |---|---|---|---|---|---|
-| Q3 | unlimited | 323.2 (322.5-334.0) | 0 | 13 | 65 |
-| Q3 | 256MB | 334.3 (332.7-339.3) | 0 | 13 | 66 |
-| Q3 | 64MB | 334.2 (334.0-334.5) | 0 | 13 | 66 |
-| Q3 | 16MB | 1,610 (1,600-1,612) | 98 | 6 | 45 |
-| Q5 | unlimited | 589.5 (585.2-597.2) | 0 | 34 | 121 |
-| Q5 | 256MB | 596.2 (595.5-603.8) | 0 | 34 | 114 |
-| Q5 | 64MB | 596.0 (594.6-607.4) | 0 | 34 | 115 |
-| Q5 | 16MB | 7,375 (7,366-7,408) | 122 | 11 | 111 |
-| High-cardinality aggregate | unlimited | 302.0 (300.7-307.4) | 0 | 0 | 271 |
-| High-cardinality aggregate | 256MB | 322.0 (321.0-326.1) | 0 | 0 | 265 |
-| High-cardinality aggregate | 64MB | 758.8 (754.7-783.0) | 36 | 0 | 165 |
-| High-cardinality aggregate | 16MB | 725.6 (714.1-751.8) | 36 | 0 | 84 |
+| Q3 | unlimited | 320.5 (319.3-323.4) | 0 | 26 | 78 |
+| Q3 | 256MB | 332.7 (329.6-357.8) | 0 | 28 | 63 |
+| Q3 | 64MB | 334.5 (329.8-370.7) | 0 | 28 | 72 |
+| Q3 | 16MB | 1,954 (1,945-2,038) | 98 | 9 | 45 |
+| Q5 | unlimited | 587.8 (582.5-620.4) | 0 | 56 | 114 |
+| Q5 | 256MB | 588.8 (586.6-598.8) | 0 | 54 | 115 |
+| Q5 | 64MB | 587.5 (584.1-621.8) | 0 | 54 | 115 |
+| Q5 | 16MB | 8,124 (7,980-8,213) | 122 | 16 | 103 |
+| High-cardinality aggregate | unlimited | 318.2 (315.9-323.8) | 0 | 147 | 260 |
+| High-cardinality aggregate | 256MB | 373.0 (340.0-386.3) | 0 | 147 | 264 |
+| High-cardinality aggregate | 64MB | 929.5 (923.0-965.9) | 36 | 41 | 119 |
+| High-cardinality aggregate | 16MB | 927.4 (882.2-940.5) | 36 | 10 | 71 |
 
 The limit bounds operator state, not the Parquet reader's row-group buffers, so peak RSS stays above it. The operator pool peak is what the query's operators allocated through Arrow's memory pool: the hash tables' storage (key index, key arena, aggregate states, join chains), sort and build-row buffers, spill buffers, batches read back from spill files and expression temporaries. It excludes the Parquet reader's row-group buffers (their own pool), the result table, and the strings that MIN and MAX of a VARCHAR hold (docs/design/0006-memory-and-spill.md). A join's build rows are counted once in the pool, although they exist twice while they are concatenated. A refused cell is the result of that cell.
 
-Source: `bench/results/spill-20261121T135405Z.json` (commit `479f7227df54`, 2026-11-21T13:54:05Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
-The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
+Source: `bench/results/spill-20261121T180222Z.json` (commit `2676a9805ba8`, 2026-11-21T18:02:22Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+Cells that ran with a 1-minute load average above 1.5 after the wait: quarry 256MB High-cardinality aggregate (default data), quarry 16MB High-cardinality aggregate (default data).
 <!-- /bench:spill -->
 
 ## Where the time goes
@@ -254,19 +255,19 @@ Summary of [docs/where-time-goes.md](docs/where-time-goes.md), which has the ope
 sample profile and the method. DuckDB itself was not profiled, so each gap is tied to what quarry
 spends its time on, not to what DuckDB does differently.
 
-- **Q1** (ratio <!-- n:main.q1.ratio -->4.25<!-- /n -->): the hash aggregate has <!-- n:ea.q1.2.time -->391.9<!-- /n --> ms of own time, <!-- n:ea.q1.2.share -->64<!-- /n -->% of the operator time, which is more than the
-  <!-- n:main.q1.duckdb -->143.0<!-- /n --> ms DuckDB needs for the whole query. There are few groups, so the time is per-row work:
-  copying rows, updating sums, checked decimal arithmetic and hashing an encoded key for every row.
-- **Q6** (ratio <!-- n:main.q6.ratio -->6.10<!-- /n -->): <!-- n:cls.q6.filter -->78<!-- /n -->% of the samples are the filter pushed into the scan. The query keeps
+- **Q1** (ratio <!-- n:main.q1.ratio -->4.31<!-- /n -->): the hash aggregate has <!-- n:ea.q1.2.time -->397.2<!-- /n --> ms of own time, <!-- n:ea.q1.2.share -->62<!-- /n -->% of the operator time, which is more than the
+  <!-- n:main.q1.duckdb -->141.0<!-- /n --> ms DuckDB needs for the whole query. There are few groups, so the time is per-row work:
+  copying rows, updating sums and checked decimal arithmetic.
+- **Q6** (ratio <!-- n:main.q6.ratio -->6.05<!-- /n -->): <!-- n:cls.q6.filter -->78<!-- /n -->% of the samples are the filter pushed into the scan. The query keeps
   <!-- n:ea.q6.2.rows -->114,160<!-- /n --> of <!-- n:data.lineitem_rows -->6,001,215<!-- /n --> rows, so almost all the work is evaluating the predicate for rows that are then
   dropped.
-- **Q3** (ratio <!-- n:main.q3.ratio -->3.59<!-- /n -->, the smallest gap): Parquet decode, the hash probe and the pushed-down filters share
+- **Q3** (ratio <!-- n:main.q3.ratio -->3.57<!-- /n -->, the smallest gap): Parquet decode, the hash probe and the pushed-down filters share
   the time, and no single function dominates.
-- **Q5** (ratio <!-- n:main.q5.ratio -->6.09<!-- /n -->, the largest gap in milliseconds): <!-- n:cls.q5.probe -->54<!-- /n -->% of the samples are the hash probe, with the
-  index lookup alone at <!-- n:frame.q5.KeyIndex::Find.probe -->28.1<!-- /n -->%. It peaks at <!-- n:main.q5.rss -->114<!-- /n --> MiB.
+- **Q5** (ratio <!-- n:main.q5.ratio -->6.29<!-- /n -->, the largest gap in milliseconds): <!-- n:cls.q5.probe -->52<!-- /n -->% of the samples are the hash probe, with the
+  index lookup alone at <!-- n:frame.q5.KeyIndex::Find.probe -->26.7<!-- /n -->%. It peaks at <!-- n:main.q5.rss -->125<!-- /n --> MiB.
 
 **The Q5 join order is a stated limit.** With `--disable-rule order_joins` Q5 takes
-<!-- n:rules.order_joins.off.q5 -->447.0<!-- /n --> ms against <!-- n:rules.on.q5 -->573.2<!-- /n --> ms with the rule on: the optimizer's order is worse than the order
+<!-- n:rules.order_joins.off.q5 -->448.8<!-- /n --> ms against <!-- n:rules.on.q5 -->577.4<!-- /n --> ms with the rule on: the optimizer's order is worse than the order
 the query was written in. The estimator has no statistics beyond row counts and the minimum and maximum of
 each column per row group, plus fixed selectivities, and a fixed selectivity for `r_name = 'ASIA'`
 (where one region in five matches) is the likely reason; that reason was not tested. The estimator's
