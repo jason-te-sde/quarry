@@ -151,7 +151,7 @@ int Usage(const std::string& message) {
 
 // The process's peak resident set size in bytes (ru_maxrss is bytes on macOS, KiB elsewhere).
 int64_t PeakRssBytes() {
-  struct rusage usage{};
+  struct rusage usage = {};
   if (getrusage(RUSAGE_SELF, &usage) != 0) return 0;
 #ifdef __APPLE__
   return static_cast<int64_t>(usage.ru_maxrss);
