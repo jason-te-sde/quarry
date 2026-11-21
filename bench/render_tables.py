@@ -302,8 +302,8 @@ BEFORE_FIXES = RESULTS / "before-review-fixes"
 
 def render_fix_wave(root):
     """The four queries before and after the fixes of the whole-branch review: quarry's median and its
-    ratio to single-threaded DuckDB in each of the two main results, and the two spill-suite cells that
-    the fixes were most likely to move (the high-cardinality aggregate)."""
+    ratio to single-threaded DuckDB in each of the two main results. It renders no spill cells; the
+    spill table has its own renderer."""
     new = newest(root, "main")
     old = newest(root, "main", BEFORE_FIXES)
     if not new or not old:

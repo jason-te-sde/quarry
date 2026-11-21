@@ -155,6 +155,15 @@ results are kept under `bench/results/before-review-fixes/` (and their profiles 
 `bench/results/profile/before-review-fixes/`) and are labelled "before the fixes of the whole-branch
 review" wherever they are cited.
 
+*Correction, 2026-11-21.* The protocol text above is kept as committed. It names the
+high-cardinality aggregate as one that uses `AVG` and `COUNT`; its query is `SUM` only (`queries.agg.sql`
+in the spill result). The change to `AVG` and `COUNT` was therefore measured only through Q1, which has
+4 groups, and the cost of the old quadratic path at scale factor 1 was never measured.
+
+For this re-measure, a desktop application's renderer process used about 200% CPU <!-- obs: read from top during the three suites by the person who ran them; no results file records it --> throughout all three
+suites, which "other services are stopped" above does not cover. The harness flags every cell that ran
+above the 1.5 load threshold, and the tables list those cells.
+
 What the fixes did to the numbers, from the two `main` results (the ratio is quarry's median over
 single-threaded DuckDB's in the same file):
 

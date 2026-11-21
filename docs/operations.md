@@ -57,7 +57,7 @@ that build a hash table, split a partition or merge spilled files, once per Parq
 once per batch a scan reads (so a scan whose filter matches nothing can be interrupted, although it
 returns no batch), and between pieces of 2^20 rows (or 65,536 batches) when a hash join, sort or
 top-N joins its materialised input into one column. They are not checked inside the read of one
-Parquet row group, inside the single copy that joins those pieces, while the operators release their
+Parquet row group, while `ScanOperator::Open` reads the footer of every file, inside the single copy that joins those pieces, while the operators release their
 state after the query ended (on a self-join of 2 million one-row arrays, about 1 GB of state, the
 process ended 51 ms after a 1 s deadline and 167 ms after a 5 s one: the delay grew with the state;
 not measured at larger sizes) <!-- obs: timed by hand once on SF0.01-sized test data while the timeout tests were written; no results file -->,
@@ -66,7 +66,7 @@ can overrun its timeout by however long one such step takes under swapping. With
 very small `--batch-size` the build side of a join is one array per row and its memory is far
 larger than the budget charges for it, which is how that happens (the first ablation attempt, with
 batch size 1 on Q5 before the join-estimate fix, swapped and was killed; `benchmarks.md` records it).
-A second Ctrl-C ends the `quarry` process at once: the first one restores the default signal action.
+A second Ctrl-C ends the `quarry` process at once, without cleanup: the first one restores the default signal action, so the second can leave the query's spill directory behind, as SIGKILL and a power loss can.
 
 ## Where spill files go
 
@@ -74,7 +74,7 @@ In a directory `quarry-spill-XXXXXX` created under `EngineOptions::spill_parent`
 temporary directory (`$TMPDIR`, else `/tmp`) when that is empty. The directory is created when a
 query starts with a limit and removed, with everything in it, when the query ends: success, error,
 Ctrl-C (SIGINT cancels the query and the CLI exits 130 after the directory is gone) or timeout.
-Only a process killed with SIGKILL, or a power loss, leaves one behind; delete the old
+Only a process killed with SIGKILL, a second Ctrl-C, or a power loss leaves one behind; delete the old
 `quarry-spill-*` directories by hand.
 
 The files hold Arrow IPC streams, uncompressed. A query can need disk for every row of its spilled

@@ -71,7 +71,7 @@ arrays of the same type). `CommonComparisonType`:
 
 The cap at 38 has a consequence: a `DECIMAL(38,0)` compared with a `DECIMAL(38,10)` has no common type
 that holds both without losing digits, so the common type is `DECIMAL(38,10)` and the integer side
-must be scaled by 10^10, which overflows 38 digits for a value of 28 digits or more. quarry reports
+must be scaled by 10^10, which overflows 38 digits for a value of 29 digits or more. quarry reports
 `decimal overflow` for such a comparison even when the values themselves are legitimate. TPC-H's
 columns are far from this, and it is a limit of the 128-bit representation.
 

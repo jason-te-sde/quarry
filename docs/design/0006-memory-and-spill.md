@@ -89,7 +89,7 @@ Rows with a NULL key match nothing in an inner join and are dropped when a side 
 
 ### Hash aggregate
 
-The group table is charged after every update. At the first `TryGrow` failure the operator writes the
+The group table pays for growth before it allocates it, and a call that cannot pay stops. At the first `TryGrow` failure the operator writes the
 **partial states** of all groups (the key, and per aggregate: COUNT the count, SUM the sum, AVG the
 exact sum and the count, MIN/MAX the value) to 16 files by the hash of the key, clears the table and
 carries on. At the end the remaining groups are written too; then each file is merged into a fresh
