@@ -221,74 +221,74 @@
  "q5": {
   "top_frames": [
    {
-    "category": "hash build",
+    "category": "probe",
     "frame": "quarry::KeyIndex::Find",
-    "samples": 2059,
-    "share": 0.2717
+    "samples": 2146,
+    "share": 0.2815
    },
    {
-    "category": "hash build",
-    "frame": "quarry::KeyIndex::Insert",
-    "samples": 1225,
-    "share": 0.1617
+    "category": "Parquet decode",
+    "frame": "snappy::DecompressBranchless",
+    "samples": 731,
+    "share": 0.0959
+   },
+   {
+    "category": "probe",
+    "frame": "_platform_memmove",
+    "samples": 367,
+    "share": 0.0481
+   },
+   {
+    "category": "probe",
+    "frame": "quarry::HashBytes",
+    "samples": 363,
+    "share": 0.0476
    },
    {
     "category": "probe",
     "frame": "quarry::Gather",
-    "samples": 697,
-    "share": 0.092
+    "samples": 257,
+    "share": 0.0337
    },
    {
     "category": "hash build",
-    "frame": "_platform_memmove",
-    "samples": 558,
-    "share": 0.0736
+    "frame": "_xzm_xzone_malloc_tiny",
+    "samples": 199,
+    "share": 0.0261
    },
    {
-    "category": "probe",
+    "category": "hash build",
     "frame": "quarry::KeyIndex::Find",
-    "samples": 322,
-    "share": 0.0425
-   },
-   {
-    "category": "probe",
-    "frame": "_platform_memmove",
-    "samples": 300,
-    "share": 0.0396
+    "samples": 194,
+    "share": 0.0254
    },
    {
     "category": "hash build",
-    "frame": "quarry::HashBytes",
-    "samples": 287,
-    "share": 0.0379
-   },
-   {
-    "category": "hash build",
-    "frame": "std::vector::__insert_with_size[abi:nqe220106]",
-    "samples": 237,
-    "share": 0.0313
+    "frame": "_xzm_free",
+    "samples": 191,
+    "share": 0.0251
    }
   ],
   "samples": {
-   "Parquet decode": 137,
-   "filter": 48,
-   "scan other": 10,
-   "hash build": 5483,
-   "probe": 1862,
-   "aggregate": 27,
+   "Parquet decode": 1019,
+   "filter": 403,
+   "scan other": 166,
+   "hash build": 1736,
+   "probe": 4112,
+   "aggregate": 10,
    "sort": 0,
-   "other": 11
+   "other": 177
   },
-  "total": 7578,
+  "total": 7623,
   "share": {
-   "Parquet decode": 0.0181,
-   "filter": 0.0063,
-   "scan other": 0.0013,
-   "hash build": 0.7235,
-   "probe": 0.2457,
-   "aggregate": 0.0036,
+   "Parquet decode": 0.1337,
+   "filter": 0.0529,
+   "scan other": 0.0218,
+   "hash build": 0.2277,
+   "probe": 0.5394,
+   "aggregate": 0.0013,
    "sort": 0.0,
-   "other": 0.0015
+   "other": 0.0232
   }
  },
  "q6": {

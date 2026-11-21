@@ -41,15 +41,15 @@ Measured on Apple M2 (8 cores, 16 GB), macOS 26.6.2. quarry: Apple clang version
 <!-- bench:main -->
 | Query | quarry, 1 thread | DuckDB, threads=1 | DuckDB, default (8 threads) | quarry / DuckDB (threads=1) |
 |---|---|---|---|---|
-| Q1 | 616.6 (606.4-617.5) | 141.5 (141.1-144.6) | 33.6 (32.8-33.8) | 4.36 |
-| Q3 | 319.5 (319.1-322.4) | 90.5 (89.6-91.9) | 27.3 (26.6-28.4) | 3.53 |
-| Q5 | 4,730 (4,707-6,062) | 93.8 (93.4-95.1) | 29.2 (28.1-29.3) | 50.40 |
-| Q6 | 341.8 (341.6-342.9) | 56.8 (54.6-57.3) | 15.7 (15.2-16.7) | 6.02 |
+| Q1 | 608.4 (603.3-609.8) | 143.0 (140.5-144.3) | 33.4 (32.5-33.6) | 4.25 |
+| Q3 | 323.3 (321.6-325.0) | 90.0 (89.7-90.6) | 28.5 (27.5-28.7) | 3.59 |
+| Q5 | 577.1 (575.3-587.4) | 94.7 (94.6-95.7) | 29.4 (28.3-29.8) | 6.09 |
+| Q6 | 344.3 (342.6-348.7) | 56.4 (55.5-57.7) | 15.7 (15.4-15.9) | 6.10 |
 
 A ratio above 1.00 means quarry is slower than single-threaded DuckDB.
 
-Source: `bench/results/main-20261121T065519Z.json` (commit `ccb030ca62b7`, 2026-11-21T06:55:19Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
-The 1-minute load average stayed at or below 1.5 before every run of every cell.
+Source: `bench/results/main-20261121T131055Z.json` (commit `479f7227df54`, 2026-11-21T13:10:55Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
 <!-- /bench:main -->
 
 ## License

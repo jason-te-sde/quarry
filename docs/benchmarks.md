@@ -188,15 +188,15 @@ Measured on Apple M2 (8 cores, 16 GB), macOS 26.6.2. quarry: Apple clang version
 <!-- bench:main -->
 | Query | quarry, 1 thread | DuckDB, threads=1 | DuckDB, default (8 threads) | quarry / DuckDB (threads=1) |
 |---|---|---|---|---|
-| Q1 | 616.6 (606.4-617.5) | 141.5 (141.1-144.6) | 33.6 (32.8-33.8) | 4.36 |
-| Q3 | 319.5 (319.1-322.4) | 90.5 (89.6-91.9) | 27.3 (26.6-28.4) | 3.53 |
-| Q5 | 4,730 (4,707-6,062) | 93.8 (93.4-95.1) | 29.2 (28.1-29.3) | 50.40 |
-| Q6 | 341.8 (341.6-342.9) | 56.8 (54.6-57.3) | 15.7 (15.2-16.7) | 6.02 |
+| Q1 | 608.4 (603.3-609.8) | 143.0 (140.5-144.3) | 33.4 (32.5-33.6) | 4.25 |
+| Q3 | 323.3 (321.6-325.0) | 90.0 (89.7-90.6) | 28.5 (27.5-28.7) | 3.59 |
+| Q5 | 577.1 (575.3-587.4) | 94.7 (94.6-95.7) | 29.4 (28.3-29.8) | 6.09 |
+| Q6 | 344.3 (342.6-348.7) | 56.4 (55.5-57.7) | 15.7 (15.4-15.9) | 6.10 |
 
 A ratio above 1.00 means quarry is slower than single-threaded DuckDB.
 
-Source: `bench/results/main-20261121T065519Z.json` (commit `ccb030ca62b7`, 2026-11-21T06:55:19Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
-The 1-minute load average stayed at or below 1.5 before every run of every cell.
+Source: `bench/results/main-20261121T131055Z.json` (commit `479f7227df54`, 2026-11-21T13:10:55Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
 <!-- /bench:main -->
 
 ### Memory
@@ -204,14 +204,14 @@ The 1-minute load average stayed at or below 1.5 before every run of every cell.
 <!-- bench:memory -->
 | Query | quarry peak RSS | quarry operator state | quarry scan buffers | DuckDB threads=1 peak RSS | DuckDB default peak RSS | Python + DuckDB idle RSS |
 |---|---|---|---|---|---|---|
-| Q1 | 38 | 0 | 19 | 99 | 206 | 85 |
-| Q3 | 65 | 13 | 12 | 122 | 294 | 85 |
-| Q5 | 6,288 | 2,612 | 12 | 128 | 285 | 86 |
-| Q6 | 26 | 0 | 13 | 96 | 183 | 86 |
+| Q1 | 38 | 0 | 19 | 99 | 212 | 85 |
+| Q3 | 65 | 13 | 12 | 118 | 302 | 86 |
+| Q5 | 114 | 34 | 12 | 127 | 279 | 85 |
+| Q6 | 26 | 0 | 13 | 96 | 180 | 85 |
 
 MiB. The DuckDB peaks include the Python interpreter, `duckdb` and `pyarrow`; the idle column is that process's RSS just before its first query and is not subtracted. quarry's operator state and scan buffers are the per-query Arrow pool peaks that `--explain-analyze` prints.
 
-Source: `bench/results/main-20261121T065519Z.json`.
+Source: `bench/results/main-20261121T131055Z.json`.
 <!-- /bench:memory -->
 
 ### Ablation: batch size
@@ -219,13 +219,13 @@ Source: `bench/results/main-20261121T065519Z.json`.
 <!-- bench:ablation-batch -->
 | Query | batch 1 | batch 64 | batch 1024 | batch 2048 | batch 8192 |
 |---|---|---|---|---|---|
-| Q1 | 94,747 (92,067-95,112) | 2,051 (2,025-2,055) | 669.4 (669.2-690.9) | 619.4 (606.3-625.4) | 566.1 (565.5-566.5) |
-| Q3 | 13,824 (13,643-14,105) | 1,119 (1,117-1,123) | 364.8 (359.7-368.5) | 319.3 (318.6-326.4) | 281.9 (281.3-282.9) |
-| Q5 | timeout | 20,118 (19,414-20,400) | 5,328 (5,288-5,711) | 4,721 (4,707-4,841) | 4,251 (4,242-4,625) |
-| Q6 | 46,636 (46,159-48,192) | 1,167 (1,164-1,236) | 371.6 (371.4-371.9) | 344.4 (342.3-348.4) | 321.3 (317.6-325.9) |
+| Q1 | 94,891 (94,363-95,103) | 2,068 (2,059-2,070) | 671.6 (671.0-672.3) | 621.2 (615.0-623.2) | 568.5 (567.9-569.7) |
+| Q3 | 14,232 (14,088-14,375) | 1,125 (1,124-1,131) | 371.1 (369.7-381.8) | 326.9 (325.9-327.3) | 288.5 (287.5-293.6) |
+| Q5 | 22,247 (22,191-22,347) | 4,055 (4,050-4,156) | 733.4 (731.8-742.8) | 588.6 (586.6-597.3) | 477.9 (476.9-481.3) |
+| Q6 | 49,162 (48,881-49,301) | 1,157 (1,156-1,158) | 381.3 (381.1-381.5) | 352.8 (351.6-353.8) | 329.0 (328.8-329.6) |
 
-Source: `bench/results/ablation-20261121T093212Z.json` (commit `a9d26080932f`, 2026-11-21T09:32:12Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
-Cells that ran with a 1-minute load average above 1.5 after the wait: quarry batch_size=1 Q1, quarry batch_size=64 Q5.
+Source: `bench/results/ablation-20261121T131139Z.json` (commit `479f7227df54`, 2026-11-21T13:11:39Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+Cells that ran with a 1-minute load average above 1.5 after the wait: quarry batch_size=1 Q1 (default data).
 <!-- /bench:ablation-batch -->
 
 ### Ablation: row-group pruning
@@ -233,13 +233,13 @@ Cells that ran with a 1-minute load average above 1.5 after the wait: quarry bat
 <!-- bench:ablation-pruning -->
 | lineitem | Query | quarry | quarry, prune_row_groups off | DuckDB threads=1 |
 |---|---|---|---|---|
-| sorted by l_shipdate | Q1 | 506.3 (505.9-506.9) | 497.5 (495.4-503.2) | 113.9 (113.8-115.8) |
-| sorted by l_shipdate | Q6 | 58.9 (58.8-59.1) | 312.6 (311.8-354.9) | 11.3 (11.3-11.9) |
-| dbgen order | Q1 | 605.4 (601.4-609.3) | 604.0 (601.7-639.2) | not run |
-| dbgen order | Q6 | 342.3 (341.8-363.1) | 341.8 (341.5-345.1) | not run |
+| sorted by l_shipdate | Q1 | 506.6 (506.2-545.9) | 507.5 (507.0-508.3) | 116.9 (116.6-117.7) |
+| sorted by l_shipdate | Q6 | 60.3 (60.2-60.7) | 321.5 (320.9-322.2) | 11.3 (10.9-11.6) |
+| dbgen order | Q1 | 619.2 (618.4-634.5) | 621.0 (618.4-626.4) | not run |
+| dbgen order | Q6 | 351.5 (350.0-354.2) | 352.8 (351.7-353.2) | not run |
 
-Source: `bench/results/ablation-20261121T093212Z.json` (commit `a9d26080932f`, 2026-11-21T09:32:12Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
-Cells that ran with a 1-minute load average above 1.5 after the wait: quarry batch_size=1 Q1, quarry batch_size=64 Q5.
+Source: `bench/results/ablation-20261121T131139Z.json` (commit `479f7227df54`, 2026-11-21T13:11:39Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
 <!-- /bench:ablation-pruning -->
 
 ### Ablation: optimizer rules
@@ -247,15 +247,15 @@ Cells that ran with a 1-minute load average above 1.5 after the wait: quarry bat
 <!-- bench:ablation-rules -->
 | Rule switched off | Query | quarry, all rules | quarry, rule off |
 |---|---|---|---|
-| `prune_columns` | Q1 | 618.4 (617.7-645.6) | 1,044 (1,040-1,046) |
-| `prune_columns` | Q3 | 318.5 (318.3-320.2) | 1,258 (1,254-1,263) |
-| `prune_columns` | Q5 | 4,777 (4,701-4,876) | timeout |
-| `prune_columns` | Q6 | 344.4 (343.3-348.7) | 856.7 (852.3-891.3) |
-| `order_joins` | Q3 | 318.5 (318.3-320.2) | 321.0 (317.8-329.1) |
-| `order_joins` | Q5 | 4,777 (4,701-4,876) | 444.5 (444.0-449.0) |
+| `prune_columns` | Q1 | 618.4 (617.9-630.3) | 1,044 (1,043-1,048) |
+| `prune_columns` | Q3 | 319.6 (318.4-320.9) | 1,261 (1,259-1,272) |
+| `prune_columns` | Q5 | 573.2 (572.9-602.5) | 1,704 (1,683-1,708) |
+| `prune_columns` | Q6 | 343.1 (342.4-383.4) | 870.4 (869.1-882.6) |
+| `order_joins` | Q3 | 319.6 (318.4-320.9) | 319.7 (318.8-323.4) |
+| `order_joins` | Q5 | 573.2 (572.9-602.5) | 447.0 (446.2-475.4) |
 
-Source: `bench/results/ablation-20261121T093212Z.json` (commit `a9d26080932f`, 2026-11-21T09:32:12Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
-Cells that ran with a 1-minute load average above 1.5 after the wait: quarry batch_size=1 Q1, quarry batch_size=64 Q5.
+Source: `bench/results/ablation-20261121T131139Z.json` (commit `479f7227df54`, 2026-11-21T13:11:39Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
 <!-- /bench:ablation-rules -->
 
 ### Cost of spilling
@@ -263,21 +263,21 @@ Cells that ran with a 1-minute load average above 1.5 after the wait: quarry bat
 <!-- bench:spill -->
 | Query | Memory limit | Time (ms) | Spilled (MiB) | Operator state peak (MiB) | Peak RSS (MiB) |
 |---|---|---|---|---|---|
-| Q3 | unlimited | 322.1 (318.6-345.7) | 0 | 13 | 67 |
-| Q3 | 256MB | 335.1 (329.2-342.5) | 0 | 13 | 66 |
-| Q3 | 64MB | 330.6 (329.8-340.1) | 0 | 13 | 66 |
-| Q3 | 16MB | 1,602 (1,596-1,617) | 98 | 6 | 46 |
-| Q5 | unlimited | 4,779 (4,693-4,881) | 0 | 2,612 | 6,288 |
-| Q5 | 256MB | 32,253 (32,151-32,505) | 2,264 | 217 | 755 |
-| Q5 | 64MB | 118,812 (118,690-119,128) | 3,965 | 54 | 297 |
-| Q5 | 16MB | 118,568 (118,208-118,624) | 4,623 | 14 | 87 |
-| High-cardinality aggregate | unlimited | 300.7 (300.0-302.4) | 0 | 0 | 265 |
-| High-cardinality aggregate | 256MB | 321.6 (319.9-329.1) | 0 | 0 | 265 |
-| High-cardinality aggregate | 64MB | 761.4 (754.8-773.5) | 36 | 0 | 165 |
-| High-cardinality aggregate | 16MB | 727.5 (717.3-759.7) | 36 | 0 | 86 |
+| Q3 | unlimited | 323.2 (322.5-334.0) | 0 | 13 | 65 |
+| Q3 | 256MB | 334.3 (332.7-339.3) | 0 | 13 | 66 |
+| Q3 | 64MB | 334.2 (334.0-334.5) | 0 | 13 | 66 |
+| Q3 | 16MB | 1,610 (1,600-1,612) | 98 | 6 | 45 |
+| Q5 | unlimited | 589.5 (585.2-597.2) | 0 | 34 | 121 |
+| Q5 | 256MB | 596.2 (595.5-603.8) | 0 | 34 | 114 |
+| Q5 | 64MB | 596.0 (594.6-607.4) | 0 | 34 | 115 |
+| Q5 | 16MB | 7,375 (7,366-7,408) | 122 | 11 | 111 |
+| High-cardinality aggregate | unlimited | 302.0 (300.7-307.4) | 0 | 0 | 271 |
+| High-cardinality aggregate | 256MB | 322.0 (321.0-326.1) | 0 | 0 | 265 |
+| High-cardinality aggregate | 64MB | 758.8 (754.7-783.0) | 36 | 0 | 165 |
+| High-cardinality aggregate | 16MB | 725.6 (714.1-751.8) | 36 | 0 | 84 |
 
 The limit bounds operator state only, not the Parquet reader's row-group buffers, so peak RSS stays above it. Batches read back from spill files use Arrow's default pool and are outside the operator-state peak (docs/design/0006-memory-and-spill.md). A refused cell is the result of that cell.
 
-Source: `bench/results/spill-20261121T105922Z.json` (commit `a9d26080932f`, 2026-11-21T10:59:22Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
-Cells that ran with a 1-minute load average above 1.5 after the wait: quarry 256MB Q5, quarry 64MB Q5, quarry 16MB Q5.
+Source: `bench/results/spill-20261121T135405Z.json` (commit `479f7227df54`, 2026-11-21T13:54:05Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
+The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
 <!-- /bench:spill -->
