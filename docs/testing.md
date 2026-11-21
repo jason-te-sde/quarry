@@ -36,6 +36,14 @@ Arrow build is cached by version, compiler and the hash of `scripts/build_arrow.
 | `clean-clone` | a fresh checkout, Arrow built by `scripts/build_arrow.sh`, then every command the README marks `<!-- run -->` (`scripts/run-readme-blocks.sh`) |
 | `build-test-macos` | Apple Clang, Release; runs only while the repository is public |
 
+The macOS job pins CMake 4.4.3, installed from the PyPI wheel with `uv tool install`. The runner's
+CMake 4.5.0 fails while configuring the Boost 1.92 that Arrow bundles: `libs/locale/CMakeLists.txt`
+calls `source_group` with a prefix that CMake 4.5 checks and 4.4 does not (`is not a prefix of
+file`). `CMAKE_POLICY_VERSION_MINIMUM=3.5` (already passed by `scripts/build_arrow.sh`) does not
+affect that check. Arrow is still built from source, with no Homebrew Arrow, and the Linux jobs and
+`build_arrow.sh` are unchanged, so the Arrow cache keys are too. Unpin it when Arrow's bundled Boost
+builds under the runner's CMake.
+
 The nightly workflow runs the differential test over many more seeds, also only while the repository
 is public. The release workflow ([release.yml](../.github/workflows/release.yml)) is described in
 [RELEASING.md](../RELEASING.md); its script and workflow are tested by

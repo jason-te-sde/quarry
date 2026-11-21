@@ -460,6 +460,21 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: "1"
         run: brew install ninja
 
+      # The runner's CMake 4.5 rejects the bundled Boost 1.92 that Arrow builds (libs/locale calls
+      # source_group(TREE) with a prefix that CMake 4.5 checks and 4.4 does not). The job pins the
+      # CMake it was developed with, from the PyPI wheel; Arrow itself is still built from source.
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Pin CMake
+        run: |
+          uv tool install cmake==4.4.3
+          echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
+
+      - name: Show the toolchain
+        run: |
+          cmake --version
+          c++ --version
+
       - name: Detect the compiler id
         run: |
           major="$(c++ --version | head -n 1 | sed -E 's/.*version ([0-9]+).*/\1/')"
