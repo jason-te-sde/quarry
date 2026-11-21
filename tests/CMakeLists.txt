@@ -67,8 +67,9 @@ add_test(NAME PlanGolden_refuses_update_in_ci
 set_tests_properties(PlanGolden_refuses_update_in_ci PROPERTIES WILL_FAIL TRUE TIMEOUT 300)
 
 # Tests of the repository's own check scripts. The objects test compiles two scratch files with
-# the C++ compiler this build uses; the flaws test builds nothing.
-foreach(script hygiene layering objects flaws)
+# the C++ compiler this build uses; the others build nothing. The release tests hold the release
+# script and workflow to RELEASING.md and to the version in CMakeLists.txt.
+foreach(script hygiene layering objects flaws release_check release_workflow readme_blocks)
   add_test(NAME ${script}_script
     COMMAND ${CMAKE_COMMAND} -E env "CXX=${CMAKE_CXX_COMPILER}"
       ${QUARRY_BASH} "${PROJECT_SOURCE_DIR}/tests/scripts/${script}_test.sh"

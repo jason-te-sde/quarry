@@ -16,7 +16,35 @@ in `uv.lock`, is the reference engine for everything that compares answers.
 | Flaws matrix | `scripts/run-flaws.sh` | holes in the suite itself (below) |
 | Fuzzing | `fuzz/` | crashes, hangs and sanitizer reports on arbitrary bytes: `fuzz_parser` as SQL text, `fuzz_query` as a query over two fixed tables, run with random engine options |
 | Sanitizers, coverage | CI jobs `sanitize`, `coverage` | memory errors and undefined behaviour anywhere the tests reach; at least 90% of the lines of `src/` and `tools/` |
-| Repository checks | `scripts/check-*.sh` and their tests | include direction between layers, no `arrow::compute` in quarry's objects, English only, no attribution, no absolute paths |
+| Repository checks | `scripts/check-*.sh`, `scripts/release-check.sh`, `scripts/run-readme-blocks.sh` and their tests in `tests/scripts/` | include direction between layers, no `arrow::compute` in quarry's objects, English only, no attribution, no absolute paths; that a release tag is the project's version and its changelog entry exists; that the README's marked commands are found and run |
+
+## CI and preflight
+
+Every push runs these jobs of [ci.yml](../.github/workflows/ci.yml); each has a time limit and the
+Arrow build is cached by version, compiler and the hash of `scripts/build_arrow.sh`.
+
+| Job | What it runs |
+| --- | --- |
+| `lint` | clang-format, clang-tidy with warnings as errors, the layering and hygiene checks and their tests |
+| `build-test` | GCC 14 and Clang 18, Debug and Release; the object check for `arrow::compute`; the whole `ctest` suite, which includes the tests of the repository's own scripts |
+| `coverage` | line coverage of `src/` and `tools/` with a floor |
+| `sanitize` | the whole suite under AddressSanitizer and UndefinedBehaviorSanitizer |
+| `fuzz` | `fuzz_parser` and `fuzz_query` for a minute each |
+| `differential` | the generator's own tests, then a fixed range of seeds against DuckDB |
+| `flaws` | one job per injected flaw |
+| `bench-smoke` | the benchmark harness on the SF0.01 data, its tests, and the check that every number in the README and the docs is the one the committed results produce |
+| `clean-clone` | a fresh checkout, Arrow built by `scripts/build_arrow.sh`, then every command the README marks `<!-- run -->` (`scripts/run-readme-blocks.sh`) |
+| `build-test-macos` | Apple Clang, Release; runs only while the repository is public |
+
+The nightly workflow runs the differential test over many more seeds, also only while the repository
+is public. The release workflow ([release.yml](../.github/workflows/release.yml)) is described in
+[RELEASING.md](../RELEASING.md); its script and workflow are tested by
+`tests/scripts/release_check_test.sh` and `tests/scripts/release_workflow_test.sh`, which hold the
+workflow, the document and the version in `CMakeLists.txt` to each other.
+
+`scripts/preflight.sh` runs the same stages locally in the same order and fails when a tool is missing.
+It does not run the coverage job, the other compilers of the matrix, the macOS job or the nightly
+seeds.
 
 ## The differential test
 
