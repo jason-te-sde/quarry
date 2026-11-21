@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <optional>
 #include <string>
 
 #include "binder/catalog.h"
@@ -42,25 +43,25 @@ bool IntegerValue(const arrow::Scalar& scalar, Int128* out) {
   if (!scalar.is_valid) return false;
   switch (scalar.type->id()) {
     case arrow::Type::INT8:
-      *out = static_cast<const arrow::Int8Scalar&>(scalar).value;
+      *out = static_cast<int64_t>(static_cast<const arrow::Int8Scalar&>(scalar).value);
       return true;
     case arrow::Type::INT16:
-      *out = static_cast<const arrow::Int16Scalar&>(scalar).value;
+      *out = static_cast<int64_t>(static_cast<const arrow::Int16Scalar&>(scalar).value);
       return true;
     case arrow::Type::INT32:
-      *out = static_cast<const arrow::Int32Scalar&>(scalar).value;
+      *out = static_cast<int64_t>(static_cast<const arrow::Int32Scalar&>(scalar).value);
       return true;
     case arrow::Type::INT64:
-      *out = static_cast<const arrow::Int64Scalar&>(scalar).value;
+      *out = static_cast<int64_t>(static_cast<const arrow::Int64Scalar&>(scalar).value);
       return true;
     case arrow::Type::UINT8:
-      *out = static_cast<const arrow::UInt8Scalar&>(scalar).value;
+      *out = static_cast<int64_t>(static_cast<const arrow::UInt8Scalar&>(scalar).value);
       return true;
     case arrow::Type::UINT16:
-      *out = static_cast<const arrow::UInt16Scalar&>(scalar).value;
+      *out = static_cast<int64_t>(static_cast<const arrow::UInt16Scalar&>(scalar).value);
       return true;
     case arrow::Type::UINT32:
-      *out = static_cast<const arrow::UInt32Scalar&>(scalar).value;
+      *out = static_cast<int64_t>(static_cast<const arrow::UInt32Scalar&>(scalar).value);
       return true;
     case arrow::Type::UINT64:
       *out = static_cast<const arrow::UInt64Scalar&>(scalar).value;
@@ -99,11 +100,10 @@ double ScanColumnDomain(const LogicalScan& scan, int output_index) {
     if (field < 0) return kUnknownDomain;
     for (const RowGroupStats& group : file.row_groups) {
       if (group.num_rows == 0) continue;
-      if (static_cast<size_t>(field) >= group.columns.size() ||
-          !group.columns[static_cast<size_t>(field)].has_value()) {
-        return kUnknownDomain;
-      }
-      const ColumnMinMax& stats = *group.columns[static_cast<size_t>(field)];
+      if (static_cast<size_t>(field) >= group.columns.size()) return kUnknownDomain;
+      const std::optional<ColumnMinMax>& entry = group.columns[static_cast<size_t>(field)];
+      if (!entry.has_value()) return kUnknownDomain;
+      const ColumnMinMax& stats = *entry;
       Int128 group_low = 0;
       Int128 group_high = 0;
       if (stats.min == nullptr || stats.max == nullptr || !IntegerValue(*stats.min, &group_low) ||

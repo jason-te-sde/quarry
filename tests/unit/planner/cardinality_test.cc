@@ -70,16 +70,6 @@ TableInfo MakeStatsTable(const std::string& name, int64_t rows,
   return table;
 }
 
-// `left JOIN right ON left.a = right.a`, the first table on the left.
-double JoinOn(const TableInfo& left, const TableInfo& right) {
-  auto join = std::make_unique<LogicalJoin>();
-  join->left = MakeScan(left);
-  join->right = MakeScan(right);
-  join->left_keys.push_back(Col(0));
-  join->right_keys.push_back(Col(0));
-  return EstimateRows(*join);
-}
-
 // A scan of columns a and b of `table`.
 std::unique_ptr<LogicalScan> MakeScan(const TableInfo& table, std::vector<ExprPtr> filters = {}) {
   auto scan = std::make_unique<LogicalScan>();
@@ -90,6 +80,16 @@ std::unique_ptr<LogicalScan> MakeScan(const TableInfo& table, std::vector<ExprPt
   scan->columns = {0, 1};
   scan->filters = std::move(filters);
   return scan;
+}
+
+// `left JOIN right ON left.a = right.a`, the first table on the left.
+double JoinOn(const TableInfo& left, const TableInfo& right) {
+  auto join = std::make_unique<LogicalJoin>();
+  join->left = MakeScan(left);
+  join->right = MakeScan(right);
+  join->left_keys.push_back(Col(0));
+  join->right_keys.push_back(Col(0));
+  return EstimateRows(*join);
 }
 
 double RowsWith(ExprPtr filter, int64_t rows = 1000) {
