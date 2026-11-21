@@ -258,7 +258,99 @@ def render_spill(root):
     )
 
 
+PROFILE_DIR = RESULTS / "profile"
+PROFILE_NAMES = [
+    ("q1", "Q1"), ("q3", "Q3"), ("q5", "Q5"), ("q5-without-order_joins", "Q5, `order_joins` off"), ("q6", "Q6"),
+]
+OPERATOR_LINE = re.compile(r"^\s*(\w+) #(\d+) .*? rows=(\d+) .*?time=([\d.]+)ms peak=(\S+)")
+
+
+def render_profile_categories(root):
+    path = root / PROFILE_DIR / "classified.json"
+    if not path.exists():
+        return NO_RESULT
+    data = json.loads(path.read_text(encoding="utf-8"))
+    categories = ["Parquet decode", "filter", "scan other", "hash build", "probe", "aggregate", "sort", "other"]
+    rows = []
+    for name, label in PROFILE_NAMES:
+        if name in data:
+            rows.append([label] + [f"{data[name]['share'][c] * 100:.0f}%" for c in categories] + [f"{data[name]['total']:,}"])
+    return "\n".join(
+        [
+            table(["Query"] + categories + ["samples"], rows),
+            "",
+            "Share of the samples taken on non-idle threads (`sample <pid> 10`, 1 ms interval) while "
+            "`quarry query --repeat` looped the query on SF1; `bench/classify_samples.py` explains the categories. "
+            f"Source: `{PROFILE_DIR.as_posix()}/classified.json`.",
+        ]
+    )
+
+
+def render_profile_frames(root):
+    path = root / PROFILE_DIR / "classified.json"
+    if not path.exists():
+        return NO_RESULT
+    data = json.loads(path.read_text(encoding="utf-8"))
+    rows = []
+    for name, label in PROFILE_NAMES:
+        if name in data:
+            for t in data[name]["top_frames"][:5]:
+                rows.append([label, f"`{t['frame']}`", t["category"], f"{t['share'] * 100:.1f}%"])
+    return table(["Query", "Function on top of the stack", "Category", "Share of samples"], rows)
+
+
+def render_profile_operators(root):
+    rows = []
+    for name, label in PROFILE_NAMES:
+        path = root / PROFILE_DIR / f"explain-analyze-{name}.txt"
+        if not path.exists():
+            continue
+        operators = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            m = OPERATOR_LINE.match(line)
+            if m:
+                operators.append((float(m.group(4)), m.group(1), m.group(2), int(m.group(3)), m.group(5)))
+        total = sum(o[0] for o in operators)
+        for time_ms, kind, number, out_rows, peak in sorted(operators, reverse=True)[:3]:
+            rows.append([label, f"{kind} #{number}", ms(time_ms), f"{time_ms / total * 100:.0f}%", f"{out_rows:,}", peak])
+    if not rows:
+        return NO_RESULT
+    return "\n".join(
+        [
+            table(["Query", "Operator", "Own time (ms)", "Share of operator time", "Rows out", "Peak state"], rows),
+            "",
+            f"The three operators with the most own time in each `--explain-analyze` run on SF1 (`{PROFILE_DIR.as_posix()}/explain-analyze-*.txt`).",
+        ]
+    )
+
+
+def render_gaps(root):
+    found = newest(root, "main")
+    if not found:
+        return NO_RESULT
+    path, d = found
+    rows = []
+    for q in MAIN_QUERIES:
+        quarry = pick(d["cells"], engine="quarry", query=q)
+        one = pick(d["cells"], engine="duckdb", config="threads=1", query=q)
+        rows.append((quarry["median_ms"] - one["median_ms"], q, quarry["median_ms"], one["median_ms"]))
+    body = [
+        [QUERY_LABEL[q], ms(a), ms(b), ms(gap), f"{a / b:.2f}"] for gap, q, a, b in sorted(rows, reverse=True)
+    ]
+    return "\n".join(
+        [
+            table(["Query", "quarry (ms)", "DuckDB threads=1 (ms)", "Gap (ms)", "Ratio"], body),
+            "",
+            f"Medians from `{path}`, largest gap first.",
+        ]
+    )
+
+
 BLOCKS = {
+    "gaps": render_gaps,
+    "profile-categories": render_profile_categories,
+    "profile-frames": render_profile_frames,
+    "profile-operators": render_profile_operators,
     "environment": render_environment,
     "main": render_main,
     "memory": render_memory,
