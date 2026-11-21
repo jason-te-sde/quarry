@@ -68,9 +68,11 @@ void PrintUsage(std::FILE* out) {
 quarry::Engine* g_engine = nullptr;
 volatile std::sig_atomic_t g_interrupted = 0;
 
-// Engine::Cancel is one atomic store, which is safe in a signal handler.
+// Engine::Cancel is one atomic store, which is safe in a signal handler. The handler removes
+// itself, so that a second Ctrl-C ends a query that does not look at the flag.
 void OnInterrupt(int) {
   g_interrupted = 1;
+  std::signal(SIGINT, SIG_DFL);
   if (g_engine != nullptr) g_engine->Cancel();
 }
 

@@ -14,6 +14,7 @@
 #include "common/flaws.h"
 #include "expr/eval.h"
 #include "expr/eval_internal.h"
+#include "exec/operator_util.h"
 #include "io/parquet_scan.h"
 #include "types/decimal.h"
 
@@ -226,6 +227,7 @@ arrow::Status ScanOperator::OpenFile(size_t index) {
 
 arrow::Result<bool> ScanOperator::LoadNextRowGroup() {
   while (file_ < files_.size()) {
+    ARROW_RETURN_NOT_OK(CheckInterrupted(*context_));
     FileState& file = *files_[file_];
     if (file.next_group >= file.groups.size()) {
       file.reader.reset();
@@ -280,6 +282,9 @@ arrow::Result<bool> ScanOperator::LoadNextRowGroup() {
 
 arrow::Result<std::optional<Batch>> ScanOperator::Next() {
   for (;;) {
+    // A selective scan can read the whole input inside this one call, so the check is here, once
+    // per batch read and per row group, and not only where the caller gets a batch.
+    ARROW_RETURN_NOT_OK(CheckInterrupted(*context_));
     if (position_ >= group_rows_) {
       ARROW_ASSIGN_OR_RAISE(const bool more, LoadNextRowGroup());
       if (!more) return std::optional<Batch>();

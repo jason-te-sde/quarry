@@ -21,6 +21,7 @@ using testing::StructOfInt64Column;
 using testing::StringColumn;
 using testing::TempDir;
 using testing::WriteParquet;
+using testing::WriteParquetRowGroups;
 using testing::WriteParquetWithoutRowGroups;
 using Clock = std::chrono::steady_clock;
 
@@ -405,6 +406,61 @@ TEST_F(NestedColumnsTest, SelectingTheNestedColumnItselfIsRefused) {
   ASSERT_FALSE(result.ok());
   EXPECT_NE(result.status().message().find("column m"), std::string::npos)
       << result.status().message();
+}
+
+// A scan whose filter matches nothing reads the whole input inside one Next call. Row-group
+// pruning is switched off so that the scan really reads every row group.
+class SelectiveScanTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    std::vector<int64_t> ids;
+    for (int64_t i = 0; i < 1000000; ++i) ids.push_back(i);
+    file_ = WriteParquetRowGroups(dir_.path() / "many.parquet", {Int64Column("id", ids)}, 500);
+  }
+
+  std::unique_ptr<Engine> MakeEngine(EngineOptions options) {
+    options.batch_size = 1;
+    options.disabled_rules = {"prune_row_groups"};
+    auto engine = std::make_unique<Engine>(std::move(options));
+    EXPECT_TRUE(engine->RegisterTable("many", {file_}).ok());
+    return engine;
+  }
+
+  TempDir dir_;
+  std::filesystem::path file_;
+};
+
+TEST_F(SelectiveScanTest, ATimeoutEndsAScanThatMatchesNothingAsCancelled) {
+  EngineOptions options;
+  options.timeout = std::chrono::milliseconds(5);
+  auto engine = MakeEngine(options);
+  const Clock::time_point start = Clock::now();
+  auto result = engine->Execute("SELECT COUNT(*) FROM many WHERE id < 0");
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start);
+  ASSERT_FALSE(result.ok()) << "the scan was meant to outlast its timeout";
+  EXPECT_TRUE(result.status().IsCancelled()) << result.status().ToString();
+  EXPECT_NE(result.status().message().find("timeout of 5 ms"), std::string::npos)
+      << result.status().message();
+  EXPECT_LT(elapsed.count(), 5 + 1000) << "cancelled after " << elapsed.count() << " ms";
+}
+
+TEST_F(SelectiveScanTest, ACancelFromAnotherThreadEndsAScanThatMatchesNothing) {
+  auto engine = MakeEngine(EngineOptions{});
+  arrow::Result<QueryResult> result = arrow::Status::Invalid("not run");
+  Clock::time_point finished;
+  std::thread runner([&] {
+    result = engine->Execute("SELECT COUNT(*) FROM many WHERE id < 0");
+    finished = Clock::now();
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  const Clock::time_point cancelled_at = Clock::now();
+  engine->Cancel();
+  runner.join();
+  ASSERT_FALSE(result.ok()) << "the scan was meant to outlast the test";
+  EXPECT_TRUE(result.status().IsCancelled()) << result.status().ToString();
+  const auto latency =
+      std::chrono::duration_cast<std::chrono::milliseconds>(finished - cancelled_at);
+  EXPECT_LT(latency.count(), 100) << "cancel took " << latency.count() << " ms";
 }
 
 }  // namespace

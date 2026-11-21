@@ -81,9 +81,12 @@ struct Engine::Impl {
     if (options.memory_limit_bytes < 0) {
       return arrow::Status::Invalid("the memory limit must not be negative");
     }
-    ARROW_ASSIGN_OR_RAISE(PhysicalPlan plan, Plan(sql));
-
+    // A Cancel() made before the query started is forgotten here; one made from now on, planning
+    // included, ends the query.
     cancelled.store(false);
+    ARROW_ASSIGN_OR_RAISE(PhysicalPlan plan, Plan(sql));
+    if (cancelled.load()) return arrow::Status::Cancelled("query cancelled");
+
     MemoryBudget budget(options.memory_limit_bytes);
     // One spill directory per query, made only when a limit makes spilling possible. It is
     // declared before the operators so that it outlives them, and removed with everything in it
