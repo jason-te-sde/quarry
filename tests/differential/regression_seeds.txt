@@ -6,9 +6,16 @@
 # 368, 934: DECIMAL -> DOUBLE divided the double of the unscaled value by 10^scale, which rounds
 #   twice above 2^53 and lands one ulp off (`x IN (1004036.4599609375)` missed rows of x).
 #   Fixed in DecimalToDouble (src/types/decimal.cc); test: DecimalTest.ToDoubleIsCorrectlyRounded.
+# 224, 243: a hash aggregate above a join, under --memory-limit 64KiB, never finished. The join held
+#   the whole budget, the aggregate could not pay for any growth, and a table that refuses rows it has
+#   not taken spills, is emptied and is given the same rows again, for ever. A call that starts with
+#   an empty table now takes its rows. Fixed in AggHashTable::PayForGroup (src/exec/agg_hash_table.cc);
+#   test: AggHashTableTest.AnEmptySpillableTableTakesItsRowsEvenWhenNothingCanBePaidFor.
 # 946: the literal -2147483648 next to an INTEGER operand is an INTEGER in DuckDB (so the sum
 #   overflows as one) and was a BIGINT in quarry. Fixed in NarrowLiteralToInteger
 #   (src/binder/binder.cc); test: BinderTest.IntegerMinimumLiteralFollowsDuckDbsTyping.
 368
 934
 946
+224
+243

@@ -25,8 +25,7 @@ class KeyIndex {
   static constexpr int64_t kAbsent = -1;
 
   // The index, key arena and offsets are allocated from `pool`.
-  explicit KeyIndex(KeyHasher hasher = {},
-                    arrow::MemoryPool* pool = arrow::default_memory_pool());
+  explicit KeyIndex(KeyHasher hasher = {}, arrow::MemoryPool* pool = arrow::default_memory_pool());
 
   int64_t size() const { return static_cast<int64_t>(offsets_.size()) - 1; }
   uint64_t Hash(std::span<const uint8_t> key) const;

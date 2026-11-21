@@ -45,11 +45,12 @@ arrow::Result<ParquetFileInfo> ReadFooter(const std::filesystem::path& path) {
   info.num_row_groups = metadata->num_row_groups();
 
   parquet::arrow::SchemaManifest manifest;
-  ARROW_RETURN_NOT_OK(parquet::arrow::SchemaManifest::Make(
-      metadata->schema(), metadata->key_value_metadata(), parquet::default_arrow_reader_properties(),
-      &manifest));
+  ARROW_RETURN_NOT_OK(
+      parquet::arrow::SchemaManifest::Make(metadata->schema(), metadata->key_value_metadata(),
+                                           parquet::default_arrow_reader_properties(), &manifest));
   if (static_cast<int>(manifest.schema_fields.size()) != info.schema->num_fields()) {
-    return arrow::Status::Invalid(path.string(), ": the Parquet schema and its Arrow form disagree");
+    return arrow::Status::Invalid(path.string(),
+                                  ": the Parquet schema and its Arrow form disagree");
   }
   info.num_leaves = metadata->num_columns();
   for (const parquet::arrow::SchemaField& field : manifest.schema_fields) {

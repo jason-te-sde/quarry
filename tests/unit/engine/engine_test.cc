@@ -19,8 +19,8 @@ namespace {
 using testing::Cell;
 using testing::Int64Column;
 using testing::MapOfStringInt64Column;
-using testing::StructOfInt64Column;
 using testing::StringColumn;
+using testing::StructOfInt64Column;
 using testing::TempDir;
 using testing::WriteParquet;
 using testing::WriteParquetRowGroups;
@@ -378,7 +378,8 @@ TEST_F(NestedColumnsTest, AFilterOnAColumnAfterTheNestedOnePrunesAndFiltersCorre
   WriteStruct();
   // x = 10 i + 1 grows with the row, so x < 1000 keeps rows 0..99: the first row group only.
   const std::string sql = "SELECT id, y FROM s WHERE x < 1000 ORDER BY id LIMIT 3";
-  EXPECT_EQ(Run(sql), (std::vector<std::vector<std::string>>{{"0", "2"}, {"1", "102"}, {"2", "202"}}));
+  EXPECT_EQ(Run(sql),
+            (std::vector<std::vector<std::string>>{{"0", "2"}, {"1", "102"}, {"2", "202"}}));
   EXPECT_EQ(Run("SELECT COUNT(*) FROM s WHERE x < 1000"),
             (std::vector<std::vector<std::string>>{{"100"}}));
   // A filter that matches nothing: statistics of the right leaf refute every row group.
@@ -531,13 +532,13 @@ TEST_F(MalformedParquetTest, ACorruptDataPageIsAQueryErrorNotACrash) {
 TEST(EngineTest, ResultsWorkedOutByHandAgree) {
   TempDir dir;
   // orders: (id, customer, amount)
-  const auto orders = WriteParquet(dir.path() / "orders.parquet",
-                                   {Int64Column("id", {1, 2, 3, 4, 5, 6}),
-                                    Int64Column("customer", {10, 10, 20, 20, 20, 30}),
-                                    Int64Column("amount", {5, 7, 1, 2, 3, 100})});
-  const auto customers = WriteParquet(dir.path() / "customers.parquet",
-                                      {Int64Column("customer", {10, 20, 40}),
-                                       StringColumn("name", {"ann", "bob", "cy"})});
+  const auto orders = WriteParquet(
+      dir.path() / "orders.parquet",
+      {Int64Column("id", {1, 2, 3, 4, 5, 6}), Int64Column("customer", {10, 10, 20, 20, 20, 30}),
+       Int64Column("amount", {5, 7, 1, 2, 3, 100})});
+  const auto customers = WriteParquet(
+      dir.path() / "customers.parquet",
+      {Int64Column("customer", {10, 20, 40}), StringColumn("name", {"ann", "bob", "cy"})});
   Engine engine{EngineOptions{}};
   ASSERT_TRUE(engine.RegisterTable("orders", {orders}).ok());
   ASSERT_TRUE(engine.RegisterTable("customers", {customers}).ok());

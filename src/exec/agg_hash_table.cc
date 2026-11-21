@@ -90,8 +90,7 @@ arrow::Result<ArrayPtr> MakeFixedArray(const std::shared_ptr<arrow::DataType>& t
 // Groups [first, first + count) of a per-group vector.
 template <typename V>
 std::span<const typename V::value_type> Part(const V& values, int64_t first, int64_t count) {
-  return std::span<const typename V::value_type>(values.data() + first,
-                                                  static_cast<size_t>(count));
+  return std::span<const typename V::value_type>(values.data() + first, static_cast<size_t>(count));
 }
 
 const uint8_t* ValidBits(const arrow::Array& array) {
@@ -105,16 +104,14 @@ bool IsValid(const uint8_t* valid, const arrow::Array& array, int64_t i) {
 class CountState final : public AggregateState {
  public:
   CountState(bool star, arrow::MemoryPool* pool) : AggregateState(pool), star_(star) {}
-  void Resize(int64_t groups) override { ResizeFor<int64_t>(counts_, static_cast<size_t>(groups), 0); }
+  void Resize(int64_t groups) override {
+    ResizeFor<int64_t>(counts_, static_cast<size_t>(groups), 0);
+  }
   int64_t GrowthBytes(int64_t groups) const override {
     return quarry::GrowthBytes(counts_, static_cast<size_t>(groups));
   }
-  void Reserve(int64_t groups) override {
-    ReserveFor(counts_, static_cast<size_t>(groups));
-  }
-  int64_t Capacity() const override {
-    return static_cast<int64_t>(std::min({counts_.capacity()}));
-  }
+  void Reserve(int64_t groups) override { ReserveFor(counts_, static_cast<size_t>(groups)); }
+  int64_t Capacity() const override { return static_cast<int64_t>(std::min({counts_.capacity()})); }
   arrow::Status Update(const uint32_t* group_ids, const arrow::Array* arg, int64_t n) override {
     if (star_ || arg == nullptr) {
       for (int64_t i = 0; i < n; ++i) ++counts_[group_ids[i]];
@@ -198,8 +195,8 @@ class SumState final : public AggregateState {
   }
   arrow::Result<ArrayPtr> Finish(int64_t first, int64_t count,
                                  arrow::MemoryPool* pool) const override {
-    return MakeFixedArray<Int128>(result_.ToArrow(), Part(sums_, first, count),
-                                  has_.data() + first, count, pool);
+    return MakeFixedArray<Int128>(result_.ToArrow(), Part(sums_, first, count), has_.data() + first,
+                                  count, pool);
   }
   int64_t memory_bytes() const override {
     return static_cast<int64_t>(sums_.capacity() * sizeof(Int128) + has_.capacity());
@@ -359,12 +356,12 @@ class AvgState final : public AggregateState {
   }
   arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
                                                      arrow::MemoryPool* pool) const override {
-    ARROW_ASSIGN_OR_RAISE(auto sums, MakeFixedArray<Int128>(Int128Partial(),
-                                                            Part(sums_, first, count), nullptr,
-                                                            count, pool));
-    ARROW_ASSIGN_OR_RAISE(auto counts,
-                          MakeFixedArray<int64_t>(arrow::int64(), Part(counts_, first, count),
-                                                  nullptr, count, pool));
+    ARROW_ASSIGN_OR_RAISE(
+        auto sums,
+        MakeFixedArray<Int128>(Int128Partial(), Part(sums_, first, count), nullptr, count, pool));
+    ARROW_ASSIGN_OR_RAISE(
+        auto counts,
+        MakeFixedArray<int64_t>(arrow::int64(), Part(counts_, first, count), nullptr, count, pool));
     return std::vector<ArrayPtr>{std::move(sums), std::move(counts)};
   }
   arrow::Status Merge(const uint32_t* group_ids, const std::vector<const arrow::Array*>& partial,
@@ -440,12 +437,12 @@ class AvgDoubleState final : public AggregateState {
   }
   arrow::Result<std::vector<ArrayPtr>> FinishPartial(int64_t first, int64_t count,
                                                      arrow::MemoryPool* pool) const override {
-    ARROW_ASSIGN_OR_RAISE(auto sums,
-                          MakeFixedArray<double>(arrow::float64(), Part(sums_, first, count),
-                                                 nullptr, count, pool));
-    ARROW_ASSIGN_OR_RAISE(auto counts,
-                          MakeFixedArray<int64_t>(arrow::int64(), Part(counts_, first, count),
-                                                  nullptr, count, pool));
+    ARROW_ASSIGN_OR_RAISE(
+        auto sums,
+        MakeFixedArray<double>(arrow::float64(), Part(sums_, first, count), nullptr, count, pool));
+    ARROW_ASSIGN_OR_RAISE(
+        auto counts,
+        MakeFixedArray<int64_t>(arrow::int64(), Part(counts_, first, count), nullptr, count, pool));
     return std::vector<ArrayPtr>{std::move(sums), std::move(counts)};
   }
   arrow::Status Merge(const uint32_t* group_ids, const std::vector<const arrow::Array*>& partial,
@@ -730,7 +727,8 @@ arrow::Result<std::unique_ptr<AggregateState>> MakeState(const AggSpec& spec,
         return std::unique_ptr<AggregateState>(std::make_unique<AvgState<int64_t>>(0, pool));
       }
       if (arg.is_decimal64()) {
-        return std::unique_ptr<AggregateState>(std::make_unique<AvgState<int64_t>>(arg.scale, pool));
+        return std::unique_ptr<AggregateState>(
+            std::make_unique<AvgState<int64_t>>(arg.scale, pool));
       }
       if (arg.is_decimal()) {
         return std::unique_ptr<AggregateState>(std::make_unique<AvgState<Int128>>(arg.scale, pool));
@@ -812,10 +810,12 @@ arrow::Status AggHashTable::Charge() {
 }
 
 // Makes room for one more group, and charges what that allocates before it does. False, with
-// nothing allocated, when a spillable table that has groups cannot pay: its caller spills it. An
-// empty table that cannot pay takes the group anyway (there is nothing to spill); Charge then
-// reports it over budget.
-arrow::Result<bool> AggHashTable::PayForGroup(int64_t key_bytes) {
+// nothing allocated, when a spillable table that has groups cannot pay: its caller spills it. A
+// call that started with an empty table (`must_accept`) takes all its rows whether or not they can
+// be paid for: the caller will empty the table and ask again with the same rows, and a budget that
+// is held by another operator (the join below an aggregate) would otherwise refuse the same rows
+// for ever. Charge then reports the table over budget, and the overshoot is one slice.
+arrow::Result<bool> AggHashTable::PayForGroup(int64_t key_bytes, bool must_accept) {
   const bool states_full = groups_ + 1 > states_capacity_;
   int64_t growth = index_.GrowthBytes(1, key_bytes);
   if (states_full) {
@@ -827,7 +827,7 @@ arrow::Result<bool> AggHashTable::PayForGroup(int64_t key_bytes) {
       charged_ += growth;
     } else if (reservation_->TryGrow(growth)) {
       charged_ += growth;
-    } else if (groups_ > 0) {
+    } else if (!must_accept) {
       over_budget_ = true;
       return false;
     }
@@ -861,6 +861,7 @@ arrow::Result<bool> AggHashTable::FindGroups(const std::vector<std::shared_ptr<a
   } else {
     EncodedKeys encoded;
     ARROW_RETURN_NOT_OK(EncodeKeys(keys, n, &encoded));
+    const bool must_accept = groups_ == 0;
     for (int64_t i = 0; i < n; ++i) {
       const std::span<const uint8_t> key = encoded.row(i);
       const uint64_t hash = index_.Hash(key);
@@ -868,7 +869,8 @@ arrow::Result<bool> AggHashTable::FindGroups(const std::vector<std::shared_ptr<a
       if (id == KeyIndex::kAbsent) {
         // A new group may grow the key index, the arena, the offsets and every state vector, each
         // while the old storage still exists. What that allocates is paid for first.
-        ARROW_ASSIGN_OR_RAISE(const bool paid, PayForGroup(static_cast<int64_t>(key.size())));
+        ARROW_ASSIGN_OR_RAISE(const bool paid,
+                              PayForGroup(static_cast<int64_t>(key.size()), must_accept));
         if (!paid) {
           // Groups this call added before it stopped keep empty states (no row has been folded
           // in); the retry finds them. Within the reserved capacity, so nothing is allocated.

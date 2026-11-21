@@ -12,9 +12,9 @@
 #include <cstring>
 
 #include "common/flaws.h"
+#include "exec/operator_util.h"
 #include "expr/eval.h"
 #include "expr/eval_internal.h"
-#include "exec/operator_util.h"
 #include "io/parquet_scan.h"
 #include "types/decimal.h"
 

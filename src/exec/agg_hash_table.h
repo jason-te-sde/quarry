@@ -44,11 +44,11 @@ class AggHashTable {
   AggHashTable& operator=(const AggHashTable&) = delete;
 
   // Folds `n` rows in: their key columns, and the argument column of each aggregate (null for
-  // COUNT(*)). OutOfMemory when the reservation cannot grow. A spillable table that has groups
-  // and cannot pay for the storage a new group needs before allocating it stops there and returns
-  // false, with over_budget() set, and none of these rows' values folded in (groups it had added
-  // by then are left with empty state): the caller spills the table, clears it and calls again with
-  // the same rows. True when the rows are in.
+  // COUNT(*)). OutOfMemory when the reservation cannot grow. A spillable table that already has
+  // groups when the call starts and cannot pay for the storage a new group needs before allocating
+  // it stops there and returns false, with over_budget() set, and none of these rows' values folded
+  // in (groups it had added by then are left with empty state): the caller spills the table, clears
+  // it and calls again with the same rows. True when the rows are in.
   arrow::Result<bool> Update(const std::vector<std::shared_ptr<arrow::Array>>& keys,
                              const std::vector<std::shared_ptr<arrow::Array>>& args, int64_t n);
 
@@ -86,7 +86,7 @@ class AggHashTable {
 
  private:
   arrow::Status Charge();
-  arrow::Result<bool> PayForGroup(int64_t key_bytes);
+  arrow::Result<bool> PayForGroup(int64_t key_bytes, bool must_accept);
   void MakeStates();
   // Assigns a group to each of `n` rows, adding the ones that are new. False (nothing changed) when
   // the storage this needs cannot be paid for before it is allocated; see Update.

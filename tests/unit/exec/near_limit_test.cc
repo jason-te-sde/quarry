@@ -124,7 +124,8 @@ class NearLimitTest : public ::testing::Test {
     return testing::Cell(*result.table->column(column)->chunk(0), 0);
   }
 
-  // The sum of an integer column (BIGINT or DECIMAL(38, 0)) over every row, as text: the answer must not depend on the limit.
+  // The sum of an integer column (BIGINT or DECIMAL(38, 0)) over every row, as text: the answer
+  // must not depend on the limit.
   static std::string ColumnSum(const QueryResult& result, int column) {
     int64_t sum = 0;
     for (const auto& chunk : result.table->column(column)->chunks()) {
@@ -137,11 +138,11 @@ class NearLimitTest : public ::testing::Test {
     std::printf(
         "NEAR-LIMIT %-9s limit %3lld MiB: pool peak %8.2f MiB, over limit %8.2f MiB, scan pool "
         "%6.2f MiB, spilled %s\n",
-                what, static_cast<long long>(limit / kMiB),
-                static_cast<double>(result.pool_peak_bytes) / static_cast<double>(kMiB),
-                static_cast<double>(result.pool_peak_bytes - limit) / static_cast<double>(kMiB),
-                static_cast<double>(result.scan_pool_peak_bytes) / static_cast<double>(kMiB),
-                Spilled(result) > 0 ? "yes" : "no");
+        what, static_cast<long long>(limit / kMiB),
+        static_cast<double>(result.pool_peak_bytes) / static_cast<double>(kMiB),
+        static_cast<double>(result.pool_peak_bytes - limit) / static_cast<double>(kMiB),
+        static_cast<double>(result.scan_pool_peak_bytes) / static_cast<double>(kMiB),
+        Spilled(result) > 0 ? "yes" : "no");
   }
 
   TempDir dir_;
@@ -154,8 +155,7 @@ class NearLimitTest : public ::testing::Test {
 };
 
 TEST_F(NearLimitTest, AHighCardinalityAggregateStaysWithinTheLimitAndTheMargin) {
-  const std::string sql =
-      "SELECT k, SUM(v), COUNT(*), AVG(v), MIN(v) FROM groups GROUP BY k";
+  const std::string sql = "SELECT k, SUM(v), COUNT(*), AVG(v), MIN(v) FROM groups GROUP BY k";
   const QueryResult reference = Run(sql, 0);
   EXPECT_GT(reference.pool_peak_bytes, 16 * kMiB) << "the aggregate state is not in the pool";
   Report("aggregate", 0, reference);
@@ -165,7 +165,9 @@ TEST_F(NearLimitTest, AHighCardinalityAggregateStaysWithinTheLimitAndTheMargin) 
     for (const int column : {0, 1, 2, 4}) {
       EXPECT_EQ(ColumnSum(result, column), ColumnSum(reference, column)) << "column " << column;
     }
-    if (limit <= 16 * kMiB) EXPECT_GT(Spilled(result), 0) << "the limit was meant to force a spill";
+    if (limit <= 16 * kMiB) {
+      EXPECT_GT(Spilled(result), 0) << "the limit was meant to force a spill";
+    }
     EXPECT_LE(result.pool_peak_bytes, limit + Margin(limit)) << "limit " << limit;
   }
 }
@@ -181,7 +183,9 @@ TEST_F(NearLimitTest, ALargeJoinStaysWithinTheLimitAndTheMargin) {
     EXPECT_EQ(Cell0(result, 0), Cell0(reference, 0));
     EXPECT_EQ(Cell0(result, 1), Cell0(reference, 1));
     EXPECT_EQ(Cell0(result, 2), Cell0(reference, 2));
-    if (limit <= 16 * kMiB) EXPECT_GT(Spilled(result), 0) << "the limit was meant to force a spill";
+    if (limit <= 16 * kMiB) {
+      EXPECT_GT(Spilled(result), 0) << "the limit was meant to force a spill";
+    }
     EXPECT_LE(result.pool_peak_bytes, limit + Margin(limit)) << "limit " << limit;
   }
 }

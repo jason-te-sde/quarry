@@ -352,6 +352,8 @@ TEST(AggHashTableTest, ASpillableTableReportsOverBudgetInsteadOfFailingAndClearR
   for (size_t i = 0; i < keys.size(); ++i) keys[i] = static_cast<int64_t>(i);
   // The table pays for the storage a new group needs before it allocates it. When it cannot, it
   // stops (false), over budget, still within the budget it was given, and the caller spills it.
+  // A table that has no group yet takes the first call whatever it costs, so give it one first.
+  ASSERT_TRUE(table.Update({Int64Array({-1})}, {nullptr}, 1).ok());
   const auto folded = table.Update({Int64Array(keys)}, {nullptr}, 500);
   ASSERT_TRUE(folded.ok()) << folded.status().ToString();
   EXPECT_FALSE(*folded);
@@ -379,10 +381,10 @@ TEST(AggHashTableTest, ASpillableTableReportsOverBudgetInsteadOfFailingAndClearR
 TEST(AggHashTableTest, FinishingInBatchesAllocatesInProportionToTheGroupsFinished) {
   constexpr int64_t kGroups = 200000;
   constexpr int64_t kBatch = 64;
-  AggHashTable table({LogicalType::Int64()},
-                     {CountStar(), Spec(AggFunc::kAvg, LogicalType::Int64()),
-                      Spec(AggFunc::kAvg, LogicalType::Double()),
-                      Spec(AggFunc::kSum, LogicalType::Int64())});
+  AggHashTable table(
+      {LogicalType::Int64()},
+      {CountStar(), Spec(AggFunc::kAvg, LogicalType::Int64()),
+       Spec(AggFunc::kAvg, LogicalType::Double()), Spec(AggFunc::kSum, LogicalType::Int64())});
   std::vector<int64_t> keys(kGroups);
   std::vector<double> doubles(kGroups);
   for (int64_t i = 0; i < kGroups; ++i) {
@@ -411,6 +413,28 @@ TEST(AggHashTableTest, FinishingInBatchesAllocatesInProportionToTheGroupsFinishe
     ASSERT_TRUE(columns.ok()) << columns.status().ToString();
   }
   EXPECT_LT(partial_pool.total_bytes_allocated(), kGroups * 400);
+}
+
+// Another operator can hold the whole budget (the join below an aggregate does). The table then
+// cannot pay for anything, and a call that starts with an empty table must still take its rows:
+// otherwise the caller spills, asks again with the same rows and is refused for ever.
+TEST(AggHashTableTest, AnEmptySpillableTableTakesItsRowsEvenWhenNothingCanBePaidFor) {
+  MemoryBudget budget(2000);
+  Reservation other(budget, "HashJoin #1");
+  ASSERT_TRUE(other.TryGrow(2000));
+  Reservation reservation(budget, "agg");
+  AggHashTable table({LogicalType::Int64()}, {CountStar()}, &reservation);
+  table.set_spillable(true);
+  std::vector<int64_t> keys(128);
+  for (size_t i = 0; i < keys.size(); ++i) keys[i] = static_cast<int64_t>(i);
+  for (int round = 0; round < 3; ++round) {
+    const auto folded = table.Update({Int64Array(keys)}, {nullptr}, 128);
+    ASSERT_TRUE(folded.ok()) << folded.status().ToString();
+    EXPECT_TRUE(*folded) << "an empty table refused its rows, so the caller would never progress";
+    EXPECT_EQ(table.num_groups(), 128);
+    EXPECT_TRUE(table.over_budget());
+    table.Clear();
+  }
 }
 
 }  // namespace

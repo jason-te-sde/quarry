@@ -16,15 +16,15 @@ namespace {
 using testing::Drain;
 using testing::FindFirstScan;
 using testing::Int64Column;
-using testing::StructOfInt64Column;
-using testing::WriteParquetRowGroups;
 using testing::PlanQuery;
 using testing::RowsOf;
 using testing::StringColumn;
+using testing::StructOfInt64Column;
 using testing::TempDir;
 using testing::TestContext;
 using testing::TotalRows;
 using testing::WriteParquet;
+using testing::WriteParquetRowGroups;
 using testing::WriteParquetWithoutRowGroups;
 
 // events.parquet: 1,000 rows, one per day from 2020-01-01 (day 18262), in ten row groups of 100.
@@ -137,11 +137,10 @@ TEST(ScanTest, RowGroupPruningUsesTheStatisticsOfTheFilteredColumnAfterANestedCo
     x.push_back(10 * i);
     y.push_back(100 * i);
   }
-  const auto file = WriteParquetRowGroups(
-      dir.path() / "n.parquet",
-      {Int64Column("id", id), StructOfInt64Column("s", a, a), Int64Column("x", x),
-       Int64Column("y", y)},
-      100);
+  const auto file = WriteParquetRowGroups(dir.path() / "n.parquet",
+                                          {Int64Column("id", id), StructOfInt64Column("s", a, a),
+                                           Int64Column("x", x), Int64Column("y", y)},
+                                          100);
   Catalog catalog;
   ASSERT_TRUE(catalog.AddTable("n", {file}).ok());
 
@@ -170,8 +169,8 @@ TEST(ScanTest, AColumnLeftInSeveralChunksIsAnErrorNotAnEmptyArray) {
   ASSERT_TRUE(ok.ok());
   EXPECT_EQ((*ok)->length(), 3);
 
-  const auto two = std::make_shared<arrow::ChunkedArray>(
-      arrow::ArrayVector{make({1, 2}), make({3})});
+  const auto two =
+      std::make_shared<arrow::ChunkedArray>(arrow::ArrayVector{make({1, 2}), make({3})});
   auto bad = SingleChunk(two, "x");
   ASSERT_FALSE(bad.ok());
   EXPECT_NE(bad.status().message().find("column x has 2 chunks"), std::string::npos)

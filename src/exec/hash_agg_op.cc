@@ -111,9 +111,8 @@ class HashAggregateOperator final : public Operator {
         // A table that cannot pay for the storage these rows need refuses them (folded is false)
         // with nothing changed; it is spilled and emptied, and the same rows go in again.
         for (bool folded = false; !folded;) {
-          ARROW_ASSIGN_OR_RAISE(
-              folded, table_->Update(Slice(keys, offset, length), Slice(args, offset, length),
-                                     length));
+          ARROW_ASSIGN_OR_RAISE(folded, table_->Update(Slice(keys, offset, length),
+                                                       Slice(args, offset, length), length));
           if (table_->over_budget()) {
             if (first_spill_ == nullptr) {
               first_spill_ = NewPartitions(0);
@@ -182,8 +181,8 @@ class HashAggregateOperator final : public Operator {
   // Merges the partial states of one file into the (empty) table. When they do not fit, splits the
   // file on the next bits of the hash instead and queues the pieces.
   arrow::Status MergePartition(const Work& work) {
-    ARROW_ASSIGN_OR_RAISE(
-        auto reader, SpillReader::Open(work.path, context_->fault, context_->pool));
+    ARROW_ASSIGN_OR_RAISE(auto reader,
+                          SpillReader::Open(work.path, context_->fault, context_->pool));
     const size_t key_count = node_.groups.size();
     std::unique_ptr<SpillPartitions> split;
     for (;;) {
