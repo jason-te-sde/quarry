@@ -97,6 +97,9 @@ class Query:
     approx: frozenset  # output columns compared with the AVG tolerance
     options: Options
     features: list = field(default_factory=list)
+    # The FROM alone, for bounding the work when push_filters is off: the WHERE is then applied after
+    # the joins, so the rows the joins make are the work, not the rows that survive the filter.
+    from_sql: str = ""
 
 
 @dataclass
@@ -791,7 +794,7 @@ def generate_query(seed, index, dataset, rng):
         disabled_rule=rng.choice([None, None] + RULES),
     )
     features = list(b.features.elements()) + options.features()
-    return Query(seed, index, sql, count_sql, ordered, frozenset(approx), options, features)
+    return Query(seed, index, sql, count_sql, ordered, frozenset(approx), options, features, from_sql)
 
 
 def generate_queries(seed, dataset):

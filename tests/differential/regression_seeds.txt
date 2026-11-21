@@ -14,8 +14,13 @@
 # 946: the literal -2147483648 next to an INTEGER operand is an INTEGER in DuckDB (so the sum
 #   overflows as one) and was a BIGINT in quarry. Fixed in NarrowLiteralToInteger
 #   (src/binder/binder.cc); test: BinderTest.IntegerMinimumLiteralFollowsDuckDbsTyping.
+# 4776: not an engine defect. With push_filters off, a four-way self-join whose filter keeps no row
+#   still makes 236 million join rows before the filter runs, which batch size 7 cannot finish in the
+#   120 s timeout; the size guard counted only the filtered rows. The runner now also counts the FROM
+#   alone when push_filters is off; test: UnfilteredSizeTest in tests/differential/test_run.py.
 368
 934
 946
 224
 243
+4776
