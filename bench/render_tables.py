@@ -62,6 +62,12 @@ def mib(value):
     return f"{value / 2**20:,.0f}"
 
 
+def mb(value):
+    # Decimal megabytes (10^6 bytes), the unit of --memory-limit, with two decimals so that a peak just
+    # above its limit does not print like the limit.
+    return f"{value / 1e6:,.2f}"
+
+
 def pick(cells, **want):
     for c in cells:
         if all(c.get(k) == v for k, v in want.items()):
@@ -267,9 +273,9 @@ def render_spill(root):
                 rows.append([QUERY_LABEL[q], b, shown, "-", "-", "-"])
             else:
                 rows.append(
-                    [QUERY_LABEL[q], b, stat(c), mib(c["spilled_bytes"]), mib(c["pool_peak_bytes"]), mib(c["peak_rss_bytes"])]
+                    [QUERY_LABEL[q], b, stat(c), mb(c["spilled_bytes"]), mb(c["pool_peak_bytes"]), mb(c["peak_rss_bytes"])]
                 )
-    header = ["Query", "Memory limit", "Time (ms)", "Spilled (MiB)", "Operator pool peak (MiB)", "Peak RSS (MiB)"]
+    header = ["Query", "Memory limit (MB)", "Time (ms)", "Spilled (MB)", "Operator pool peak (MB)", "Peak RSS (MB)"]
     return "\n".join(
         [
             table(header, rows),
@@ -279,9 +285,11 @@ def render_spill(root):
             "hash tables' storage (key index, key arena, aggregate states, join chains), sort and build-row "
             "buffers, spill buffers, batches read back from spill files and expression temporaries. It excludes "
             "the Parquet reader's row-group buffers (their own pool), the result table, and the strings that "
-            "MIN and MAX of a VARCHAR hold (docs/design/0006-memory-and-spill.md). A join's build rows are "
-            "counted once in the pool, although they exist twice while they are concatenated. A refused cell is "
-            "the result of that cell.",
+            "MIN and MAX of a VARCHAR hold (docs/design/0006-memory-and-spill.md). The limit and the three sizes "
+            "are in the same unit, MB of 10^6 bytes, as `--memory-limit` counts them. A join's build rows are "
+            "charged once, but a join makes a second copy of them when it concatenates its build side, and that "
+            "copy can sit in the operator pool, so the pool peak can pass the limit: Q5 at 16MB is above it "
+            "(known issue in the CHANGELOG). A refused cell is the result of that cell.",
             "",
             source_line(path, d),
             flagged(d, "spill"),
@@ -495,8 +503,8 @@ def build_facts(root):
         for c in found[1]["cells"]:
             if c["status"] == "ok":
                 facts[f"spill.{c['query']}.{c['config']}.ms"] = ms(c["median_ms"])
-                facts[f"spill.{c['query']}.{c['config']}.spilled"] = mib(c["spilled_bytes"])
-                facts[f"spill.{c['query']}.{c['config']}.state"] = mib(c["pool_peak_bytes"])
+                facts[f"spill.{c['query']}.{c['config']}.spilled"] = mb(c["spilled_bytes"])
+                facts[f"spill.{c['query']}.{c['config']}.state"] = mb(c["pool_peak_bytes"])
     found = newest(root, "spill", BEFORE_RESULTS)
     if found:
         for c in found[1]["cells"]:
@@ -507,7 +515,8 @@ def build_facts(root):
         for c in found[1]["cells"]:
             if c["status"] == "ok":
                 facts[f"fixes.before.spill.{c['query']}.{c['config']}.ms"] = ms(c["median_ms"])
-                facts[f"fixes.before.spill.{c['query']}.{c['config']}.state"] = mib(c["pool_peak_bytes"])
+                facts[f"fixes.before.spill.{c['query']}.{c['config']}.state"] = mb(c["pool_peak_bytes"])
+                facts[f"fixes.before.spill.{c['query']}.{c['config']}.spilled"] = mb(c["spilled_bytes"])
     for tag, (directory, name) in PROFILE_TAGS.items():
         path = root / directory / f"explain-analyze-{name}.txt"
         if path.exists():

@@ -50,6 +50,23 @@ class RenderTablesTest(unittest.TestCase):
     def run_tables(self, *flags):
         return render_tables.main(["--repo-root", str(self.root), *flags])
 
+    def test_the_spill_table_shows_the_limit_and_the_peaks_in_one_unit_and_tells_a_peak_over_the_limit_apart(self):
+        document = {
+            "suite": "spill", "repo_commit": "0123456789abcdef", "timestamp_utc": "2026-01-01T00:00:00Z",
+            "protocol": {"load_wait_s": 120},
+            "cells": [
+                cell("quarry", "16MB", "q5", 100.0, group="spill", pool_peak_bytes=17_091_680,
+                     spilled_bytes=128_181_112, peak_rss_bytes=108_000_000),
+            ],
+        }
+        self.result("spill-20260101T000000Z.json", document)
+        self.readme.write_text("# t\n\n<!-- bench:spill -->\nstale\n<!-- /bench:spill -->\n")
+        self.assertEqual(self.run_tables(), 0)
+        rendered = self.readme.read_text()
+        self.assertIn("Operator pool peak (MB)", rendered)
+        self.assertIn("| 17.09 |", rendered)
+        self.assertNotIn("| 16 |", rendered)
+
     def test_a_missing_result_says_so(self):
         self.assertEqual(self.run_tables(), 0)
         self.assertIn("No result is committed", self.readme.read_text())

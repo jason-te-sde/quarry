@@ -70,7 +70,7 @@ Only a process killed with SIGKILL, or a power loss, leaves one behind; delete t
 
 The files hold Arrow IPC streams, uncompressed. A query can need disk for every row of its spilled
 inputs once per split, so budget disk at a few times the size of the joined and grouped columns.
-Q5 at scale factor 1 with `--memory-limit 16MB` writes <!-- n:spill.q5.16MB.spilled -->122<!-- /n --> MiB (the README's spill table).
+Q5 at scale factor 1 with `--memory-limit 16MB` writes <!-- n:spill.q5.16MB.spilled -->128.18<!-- /n --> MB (the README's spill table).
 
 ## What the errors mean
 

@@ -72,7 +72,7 @@ re-run after it.
 Two cells that did not finish before now do, both at the fixed commit: Q5 at batch size 1 takes
 <!-- n:batch.1.q5 -->22,524<!-- /n --> ms and Q5 with `prune_columns` off takes <!-- n:rules.prune_columns.off.q5 -->1,705<!-- /n --> ms. The Q5 spill rows are no longer
 slow in the same way: <!-- const: the spill suite's limits --> at 64 MB Q5 takes <!-- n:spill.q5.64MB.ms -->587.5<!-- /n --> ms and does not spill; at 16 MB it takes
-<!-- n:spill.q5.16MB.ms -->8,124<!-- /n --> ms and spills <!-- n:spill.q5.16MB.spilled -->122<!-- /n --> MiB (spill table in [benchmarks.md](benchmarks.md)).
+<!-- n:spill.q5.16MB.ms -->8,124<!-- /n --> ms and spills <!-- n:spill.q5.16MB.spilled -->128.18<!-- /n --> MB (spill table in [benchmarks.md](benchmarks.md)).
 
 ### 2. Q1: aggregating every lineitem row costs more than DuckDB's whole query
 

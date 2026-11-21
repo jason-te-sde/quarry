@@ -228,22 +228,22 @@ The last row is a loss for the optimizer: with `order_joins` off, Q5 is faster. 
 And the cost of staying inside a memory limit, with the queries whose joins and aggregations spill:
 
 <!-- bench:spill -->
-| Query | Memory limit | Time (ms) | Spilled (MiB) | Operator pool peak (MiB) | Peak RSS (MiB) |
+| Query | Memory limit (MB) | Time (ms) | Spilled (MB) | Operator pool peak (MB) | Peak RSS (MB) |
 |---|---|---|---|---|---|
-| Q3 | unlimited | 320.5 (319.3-323.4) | 0 | 26 | 78 |
-| Q3 | 256MB | 332.7 (329.6-357.8) | 0 | 28 | 63 |
-| Q3 | 64MB | 334.5 (329.8-370.7) | 0 | 28 | 72 |
-| Q3 | 16MB | 1,954 (1,945-2,038) | 98 | 9 | 45 |
-| Q5 | unlimited | 587.8 (582.5-620.4) | 0 | 56 | 114 |
-| Q5 | 256MB | 588.8 (586.6-598.8) | 0 | 54 | 115 |
-| Q5 | 64MB | 587.5 (584.1-621.8) | 0 | 54 | 115 |
-| Q5 | 16MB | 8,124 (7,980-8,213) | 122 | 16 | 103 |
-| High-cardinality aggregate | unlimited | 318.2 (315.9-323.8) | 0 | 147 | 260 |
-| High-cardinality aggregate | 256MB | 373.0 (340.0-386.3) | 0 | 147 | 264 |
-| High-cardinality aggregate | 64MB | 929.5 (923.0-965.9) | 36 | 41 | 119 |
-| High-cardinality aggregate | 16MB | 927.4 (882.2-940.5) | 36 | 10 | 71 |
+| Q3 | unlimited | 320.5 (319.3-323.4) | 0.00 | 27.20 | 81.95 |
+| Q3 | 256MB | 332.7 (329.6-357.8) | 0.00 | 29.12 | 65.91 |
+| Q3 | 64MB | 334.5 (329.8-370.7) | 0.00 | 29.12 | 75.58 |
+| Q3 | 16MB | 1,954 (1,945-2,038) | 102.98 | 9.68 | 46.92 |
+| Q5 | unlimited | 587.8 (582.5-620.4) | 0.00 | 58.76 | 120.01 |
+| Q5 | 256MB | 588.8 (586.6-598.8) | 0.00 | 57.05 | 120.82 |
+| Q5 | 64MB | 587.5 (584.1-621.8) | 0.00 | 57.05 | 120.90 |
+| Q5 | 16MB | 8,124 (7,980-8,213) | 128.18 | 17.09 | 107.99 |
+| High-cardinality aggregate | unlimited | 318.2 (315.9-323.8) | 0.00 | 154.14 | 272.94 |
+| High-cardinality aggregate | 256MB | 373.0 (340.0-386.3) | 0.00 | 154.14 | 276.61 |
+| High-cardinality aggregate | 64MB | 929.5 (923.0-965.9) | 37.54 | 43.03 | 124.62 |
+| High-cardinality aggregate | 16MB | 927.4 (882.2-940.5) | 37.55 | 10.79 | 74.50 |
 
-The limit bounds operator state, not the Parquet reader's row-group buffers, so peak RSS stays above it. The operator pool peak is what the query's operators allocated through Arrow's memory pool: the hash tables' storage (key index, key arena, aggregate states, join chains), sort and build-row buffers, spill buffers, batches read back from spill files and expression temporaries. It excludes the Parquet reader's row-group buffers (their own pool), the result table, and the strings that MIN and MAX of a VARCHAR hold (docs/design/0006-memory-and-spill.md). A join's build rows are counted once in the pool, although they exist twice while they are concatenated. A refused cell is the result of that cell.
+The limit bounds operator state, not the Parquet reader's row-group buffers, so peak RSS stays above it. The operator pool peak is what the query's operators allocated through Arrow's memory pool: the hash tables' storage (key index, key arena, aggregate states, join chains), sort and build-row buffers, spill buffers, batches read back from spill files and expression temporaries. It excludes the Parquet reader's row-group buffers (their own pool), the result table, and the strings that MIN and MAX of a VARCHAR hold (docs/design/0006-memory-and-spill.md). The limit and the three sizes are in the same unit, MB of 10^6 bytes, as `--memory-limit` counts them. A join's build rows are charged once, but a join makes a second copy of them when it concatenates its build side, and that copy can sit in the operator pool, so the pool peak can pass the limit: Q5 at 16MB is above it (known issue in the CHANGELOG). A refused cell is the result of that cell.
 
 Source: `bench/results/spill-20261121T180222Z.json` (commit `2676a9805ba8`, 2026-11-21T18:02:22Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
 Cells that ran with a 1-minute load average above 1.5 after the wait: quarry 256MB High-cardinality aggregate (default data), quarry 16MB High-cardinality aggregate (default data).

@@ -169,12 +169,15 @@ single-threaded DuckDB's in the same file):
 Before: `bench/results/before-review-fixes/main-20261121T131055Z.json` (commit `479f7227df54`). After: `bench/results/main-20261121T163719Z.json` (commit `2676a9805ba8`). The ratio is quarry's median over DuckDB's, `threads=1`, in the same result file.
 <!-- /bench:fix-wave -->
 
-The four queries moved by a few percent, which is the run-to-run spread of these files. The cost shows
-where a limit is tight. Q3 at `--memory-limit 16MB` took <!-- n:fixes.before.spill.q3.16MB.ms -->1,610<!-- /n --> ms before and takes <!-- n:spill.q3.16MB.ms -->1,954<!-- /n --> ms now, and Q5 at that limit
-took <!-- n:fixes.before.spill.q5.16MB.ms -->7,375<!-- /n --> ms and takes <!-- n:spill.q5.16MB.ms -->8,124<!-- /n --> ms: a table now pays for the doubled slot array of a rehash before it
-allocates it, counting the old array and the new together, so it spills earlier than it used to. The
-high-cardinality aggregate's operator pool peak without a limit went from <!-- n:fixes.before.spill.agg.unlimited.state -->0<!-- /n --> MiB to
-<!-- n:spill.agg.unlimited.state -->147<!-- /n --> MiB, because its state is now allocated from the pool; its time did not move. The
+The four queries moved by a few percent, which is the run-to-run spread of these files. The times
+rose where a limit is tight. Q3 at `--memory-limit 16MB` took <!-- n:fixes.before.spill.q3.16MB.ms -->1,610<!-- /n --> ms before and takes <!-- n:spill.q3.16MB.ms -->1,954<!-- /n --> ms now, and Q5 at that limit
+took <!-- n:fixes.before.spill.q5.16MB.ms -->7,375<!-- /n --> ms and takes <!-- n:spill.q5.16MB.ms -->8,124<!-- /n --> ms. The high-cardinality aggregate took <!-- n:fixes.before.spill.agg.64MB.ms -->758.8<!-- /n --> ms at `64MB` and
+<!-- n:fixes.before.spill.agg.16MB.ms -->725.6<!-- /n --> ms at `16MB` before, and takes <!-- n:spill.agg.64MB.ms -->929.5<!-- /n --> ms and <!-- n:spill.agg.16MB.ms -->927.4<!-- /n --> ms now. The bytes spilled did not change: Q3 at `16MB`
+wrote <!-- n:fixes.before.spill.q3.16MB.spilled -->102.99<!-- /n --> MB before and writes <!-- n:spill.q3.16MB.spilled -->102.98<!-- /n --> MB now, Q5 at `16MB` <!-- n:fixes.before.spill.q5.16MB.spilled -->128.18<!-- /n --> MB both times, and the aggregate at `64MB`
+<!-- n:fixes.before.spill.agg.64MB.spilled -->37.54<!-- /n --> MB both times. The cause of the slower times was not measured. The cells that do not spill did not
+move for Q3 (<!-- n:fixes.before.spill.q3.unlimited.ms -->323.2<!-- /n --> ms before, <!-- n:spill.q3.unlimited.ms -->320.5<!-- /n --> ms now) or Q5 (<!-- n:fixes.before.spill.q5.unlimited.ms -->589.5<!-- /n --> ms, <!-- n:spill.q5.unlimited.ms -->587.8<!-- /n --> ms); the aggregate's moved from
+<!-- n:fixes.before.spill.agg.unlimited.ms -->302.0<!-- /n --> ms to <!-- n:spill.agg.unlimited.ms -->318.2<!-- /n --> ms. The high-cardinality aggregate's operator pool peak without a limit went from
+<!-- n:fixes.before.spill.agg.unlimited.state -->0.05<!-- /n --> MB to <!-- n:spill.agg.unlimited.state -->154.14<!-- /n --> MB, because its state is now allocated from the pool. The
 `prune_columns` and `order_joins` rows of the ablation, and Q5 with `order_joins` off being faster than
 with it on, are as before.
 
@@ -313,22 +316,22 @@ The 1-minute load average stayed at or below 1.5 before every run of every measu
 ### Cost of spilling
 
 <!-- bench:spill -->
-| Query | Memory limit | Time (ms) | Spilled (MiB) | Operator pool peak (MiB) | Peak RSS (MiB) |
+| Query | Memory limit (MB) | Time (ms) | Spilled (MB) | Operator pool peak (MB) | Peak RSS (MB) |
 |---|---|---|---|---|---|
-| Q3 | unlimited | 320.5 (319.3-323.4) | 0 | 26 | 78 |
-| Q3 | 256MB | 332.7 (329.6-357.8) | 0 | 28 | 63 |
-| Q3 | 64MB | 334.5 (329.8-370.7) | 0 | 28 | 72 |
-| Q3 | 16MB | 1,954 (1,945-2,038) | 98 | 9 | 45 |
-| Q5 | unlimited | 587.8 (582.5-620.4) | 0 | 56 | 114 |
-| Q5 | 256MB | 588.8 (586.6-598.8) | 0 | 54 | 115 |
-| Q5 | 64MB | 587.5 (584.1-621.8) | 0 | 54 | 115 |
-| Q5 | 16MB | 8,124 (7,980-8,213) | 122 | 16 | 103 |
-| High-cardinality aggregate | unlimited | 318.2 (315.9-323.8) | 0 | 147 | 260 |
-| High-cardinality aggregate | 256MB | 373.0 (340.0-386.3) | 0 | 147 | 264 |
-| High-cardinality aggregate | 64MB | 929.5 (923.0-965.9) | 36 | 41 | 119 |
-| High-cardinality aggregate | 16MB | 927.4 (882.2-940.5) | 36 | 10 | 71 |
+| Q3 | unlimited | 320.5 (319.3-323.4) | 0.00 | 27.20 | 81.95 |
+| Q3 | 256MB | 332.7 (329.6-357.8) | 0.00 | 29.12 | 65.91 |
+| Q3 | 64MB | 334.5 (329.8-370.7) | 0.00 | 29.12 | 75.58 |
+| Q3 | 16MB | 1,954 (1,945-2,038) | 102.98 | 9.68 | 46.92 |
+| Q5 | unlimited | 587.8 (582.5-620.4) | 0.00 | 58.76 | 120.01 |
+| Q5 | 256MB | 588.8 (586.6-598.8) | 0.00 | 57.05 | 120.82 |
+| Q5 | 64MB | 587.5 (584.1-621.8) | 0.00 | 57.05 | 120.90 |
+| Q5 | 16MB | 8,124 (7,980-8,213) | 128.18 | 17.09 | 107.99 |
+| High-cardinality aggregate | unlimited | 318.2 (315.9-323.8) | 0.00 | 154.14 | 272.94 |
+| High-cardinality aggregate | 256MB | 373.0 (340.0-386.3) | 0.00 | 154.14 | 276.61 |
+| High-cardinality aggregate | 64MB | 929.5 (923.0-965.9) | 37.54 | 43.03 | 124.62 |
+| High-cardinality aggregate | 16MB | 927.4 (882.2-940.5) | 37.55 | 10.79 | 74.50 |
 
-The limit bounds operator state, not the Parquet reader's row-group buffers, so peak RSS stays above it. The operator pool peak is what the query's operators allocated through Arrow's memory pool: the hash tables' storage (key index, key arena, aggregate states, join chains), sort and build-row buffers, spill buffers, batches read back from spill files and expression temporaries. It excludes the Parquet reader's row-group buffers (their own pool), the result table, and the strings that MIN and MAX of a VARCHAR hold (docs/design/0006-memory-and-spill.md). A join's build rows are counted once in the pool, although they exist twice while they are concatenated. A refused cell is the result of that cell.
+The limit bounds operator state, not the Parquet reader's row-group buffers, so peak RSS stays above it. The operator pool peak is what the query's operators allocated through Arrow's memory pool: the hash tables' storage (key index, key arena, aggregate states, join chains), sort and build-row buffers, spill buffers, batches read back from spill files and expression temporaries. It excludes the Parquet reader's row-group buffers (their own pool), the result table, and the strings that MIN and MAX of a VARCHAR hold (docs/design/0006-memory-and-spill.md). The limit and the three sizes are in the same unit, MB of 10^6 bytes, as `--memory-limit` counts them. A join's build rows are charged once, but a join makes a second copy of them when it concatenates its build side, and that copy can sit in the operator pool, so the pool peak can pass the limit: Q5 at 16MB is above it (known issue in the CHANGELOG). A refused cell is the result of that cell.
 
 Source: `bench/results/spill-20261121T180222Z.json` (commit `2676a9805ba8`, 2026-11-21T18:02:22Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
 Cells that ran with a 1-minute load average above 1.5 after the wait: quarry 256MB High-cardinality aggregate (default data), quarry 16MB High-cardinality aggregate (default data).
