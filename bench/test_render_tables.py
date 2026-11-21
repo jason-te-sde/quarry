@@ -118,6 +118,21 @@ class RenderTablesTest(unittest.TestCase):
         self.assertNotIn("Q5", text)
         self.assertIn("no load figure", text)
 
+    def test_a_prose_number_is_rendered_from_the_results_and_checked(self):
+        self.result("main-20260101T000000Z.json", main_result(25.0))
+        self.readme.write_text("The ratio is <!-- n:main.q1.ratio -->0<!-- /n --> for Q1.\n")
+        self.assertEqual(self.run_tables("--check"), 1)
+        self.assertEqual(self.run_tables(), 0)
+        self.assertIn("<!-- n:main.q1.ratio -->2.50<!-- /n -->", self.readme.read_text())
+        self.assertEqual(self.run_tables("--check"), 0)
+        self.readme.write_text(self.readme.read_text().replace("2.50", "3.50"))
+        self.assertEqual(self.run_tables("--check"), 1)
+
+    def test_a_prose_number_no_result_produces_is_an_error(self):
+        self.result("main-20260101T000000Z.json", main_result(25.0))
+        self.readme.write_text("<!-- n:main.q9.ratio -->1<!-- /n -->\n")
+        self.assertEqual(self.run_tables(), 1)
+
     def test_an_unknown_table_is_an_error(self):
         self.readme.write_text("<!-- bench:nope -->\n<!-- /bench:nope -->\n")
         self.assertEqual(self.run_tables(), 1)

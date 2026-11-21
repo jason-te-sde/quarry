@@ -5,7 +5,8 @@
   uv run bench/render_tables.py --check    change nothing; exit 1 and show a diff when a table differs
 
 A table lives between `<!-- bench:NAME -->` and `<!-- /bench:NAME -->`; everything between the two
-is replaced. Each table is rendered from the newest result file of one suite in bench/results/
+is replaced. A number in prose is written `<!-- n:NAME -->value<!-- /n -->`; the value is replaced
+by what the results say (build_facts), and --check fails on one that no result produces. Each table is rendered from the newest result file of one suite in bench/results/
 (the file name carries the UTC time), and names that file under the table. The smoke suite is never
 rendered, and neither is a result recorded without waiting for the load average (--no-load-wait).
 A table whose suite has no result says so.
@@ -28,10 +29,10 @@ MAIN_QUERIES = ["q1", "q3", "q5", "q6"]
 NO_RESULT = "_No result is committed for this table yet._"
 
 
-def newest(root, suite):
+def newest(root, suite, directory=RESULTS):
     """The newest usable result of a suite: (relative path, document), or None."""
     found = []
-    for path in sorted((root / RESULTS).glob(f"{suite}-*.json")):
+    for path in sorted((root / directory).glob(f"{suite}-*.json")):
         document = json.loads(path.read_text(encoding="utf-8"))
         if document.get("protocol", {}).get("load_wait_s", 0) > 0:
             found.append((path, document))
@@ -269,40 +270,46 @@ def render_spill(root):
 
 
 PROFILE_DIR = RESULTS / "profile"
-PROFILE_NAMES = [
-    ("q1", "Q1"), ("q3", "Q3"), ("q5", "Q5"), ("q5-without-order_joins", "Q5, `order_joins` off"), ("q6", "Q6"),
+BEFORE_DIR = PROFILE_DIR / "before-join-estimate-fix"
+# (directory, file name stem, label). The first Q5 is the plan that ships; the last Q5 profile is
+# the one taken before the join-estimate fix, kept and labelled as such.
+PROFILE_SOURCES = [
+    (PROFILE_DIR, "q1", "Q1"), (PROFILE_DIR, "q3", "Q3"), (PROFILE_DIR, "q5", "Q5"),
+    (PROFILE_DIR, "q5-without-order_joins", "Q5, `order_joins` off"), (PROFILE_DIR, "q6", "Q6"),
+    (BEFORE_DIR, "q5", "Q5, before the join-estimate fix"),
 ]
 OPERATOR_LINE = re.compile(r"^\s*(\w+) #(\d+) .*? rows=(\d+) .*?time=([\d.]+)ms peak=(\S+)")
 
 
+def classified(root, directory):
+    path = root / directory / "classified.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+
 def render_profile_categories(root):
-    path = root / PROFILE_DIR / "classified.json"
-    if not path.exists():
-        return NO_RESULT
-    data = json.loads(path.read_text(encoding="utf-8"))
     categories = ["Parquet decode", "filter", "scan other", "hash build", "probe", "aggregate", "sort", "other"]
     rows = []
-    for name, label in PROFILE_NAMES:
+    for directory, name, label in PROFILE_SOURCES:
+        data = classified(root, directory)
         if name in data:
             rows.append([label] + [f"{data[name]['share'][c] * 100:.0f}%" for c in categories] + [f"{data[name]['total']:,}"])
+    if not rows:
+        return NO_RESULT
     return "\n".join(
         [
             table(["Query"] + categories + ["samples"], rows),
             "",
             "Share of the samples taken on non-idle threads (`sample <pid> 10`, 1 ms interval) while "
             "`quarry query --repeat` looped the query on SF1; `bench/classify_samples.py` explains the categories. "
-            f"Source: `{PROFILE_DIR.as_posix()}/classified.json`.",
+            f"Source: `{PROFILE_DIR.as_posix()}/classified.json` (the row before the fix: `{BEFORE_DIR.as_posix()}/classified.json`).",
         ]
     )
 
 
 def render_profile_frames(root):
-    path = root / PROFILE_DIR / "classified.json"
-    if not path.exists():
-        return NO_RESULT
-    data = json.loads(path.read_text(encoding="utf-8"))
     rows = []
-    for name, label in PROFILE_NAMES:
+    for directory, name, label in PROFILE_SOURCES:
+        data = classified(root, directory)
         if name in data:
             for t in data[name]["top_frames"][:5]:
                 rows.append([label, f"`{t['frame']}`", t["category"], f"{t['share'] * 100:.1f}%"])
@@ -311,8 +318,8 @@ def render_profile_frames(root):
 
 def render_profile_operators(root):
     rows = []
-    for name, label in PROFILE_NAMES:
-        path = root / PROFILE_DIR / f"explain-analyze-{name}.txt"
+    for directory, name, label in PROFILE_SOURCES:
+        path = root / directory / f"explain-analyze-{name}.txt"
         if not path.exists():
             continue
         operators = []
@@ -356,6 +363,104 @@ def render_gaps(root):
     )
 
 
+# Numbers quoted in prose. A prose number is written `<!-- n:NAME -->value<!-- /n -->`; the renderer
+# replaces the value with what the committed results say, so --check fails on a prose number that
+# no result produced, as it does for a table.
+BEFORE_RESULTS = RESULTS / "before-join-estimate-fix"
+PROFILE_TAGS = {
+    "q1": (PROFILE_DIR, "q1"), "q3": (PROFILE_DIR, "q3"), "q5": (PROFILE_DIR, "q5"),
+    "q5off": (PROFILE_DIR, "q5-without-order_joins"), "q6": (PROFILE_DIR, "q6"),
+    "q5before": (BEFORE_DIR, "q5"),
+}
+
+
+def comma(value):
+    return f"{value:,}"
+
+
+def add_main_facts(facts, prefix, document):
+    for q in MAIN_QUERIES:
+        quarry = pick(document["cells"], engine="quarry", query=q)
+        one = pick(document["cells"], engine="duckdb", config="threads=1", query=q)
+        if quarry["status"] == "ok":
+            facts[f"{prefix}{q}.quarry"] = ms(quarry["median_ms"])
+            facts[f"{prefix}{q}.rss"] = mib(quarry["peak_rss_bytes"])
+            facts[f"{prefix}{q}.state"] = mib(quarry["pool_peak_bytes"])
+        if one["status"] == "ok":
+            facts[f"{prefix}{q}.duckdb"] = ms(one["median_ms"])
+        if quarry["status"] == "ok" and one["status"] == "ok":
+            facts[f"{prefix}{q}.ratio"] = f"{quarry['median_ms'] / one['median_ms']:.2f}"
+            facts[f"{prefix}{q}.gap"] = ms(quarry["median_ms"] - one["median_ms"])
+
+
+def build_facts(root):
+    facts = {}
+    found = newest(root, "main")
+    if found:
+        add_main_facts(facts, "main.", found[1])
+    found = newest(root, "main", BEFORE_RESULTS)
+    if found:
+        add_main_facts(facts, "before.main.", found[1])
+    found = newest(root, "ablation")
+    if found:
+        cells = found[1]["cells"]
+        for c in cells:
+            if c["group"] == "batch" and c["status"] == "ok":
+                facts[f"batch.{c['config'].split('=')[1]}.{c['query']}"] = ms(c["median_ms"])
+            if c["group"] == "rules" and c["status"] == "ok":
+                if c["config"] == "default":
+                    facts[f"rules.on.{c['query']}"] = ms(c["median_ms"])
+                else:
+                    facts[f"rules.{c['config'].split()[-1]}.off.{c['query']}"] = ms(c["median_ms"])
+    found = newest(root, "ablation", BEFORE_RESULTS)
+    if found:
+        for c in found[1]["cells"]:
+            if c["group"] == "rules" and c["status"] == "ok" and c["config"] == "without order_joins":
+                facts[f"before.rules.order_joins.off.{c['query']}"] = ms(c["median_ms"])
+    found = newest(root, "spill")
+    if found:
+        for c in found[1]["cells"]:
+            if c["status"] == "ok":
+                facts[f"spill.{c['query']}.{c['config']}.ms"] = ms(c["median_ms"])
+                facts[f"spill.{c['query']}.{c['config']}.spilled"] = mib(c["spilled_bytes"])
+    found = newest(root, "spill", BEFORE_RESULTS)
+    if found:
+        for c in found[1]["cells"]:
+            if c["status"] == "ok":
+                facts[f"before.spill.{c['query']}.{c['config']}.ms"] = ms(c["median_ms"])
+    for tag, (directory, name) in PROFILE_TAGS.items():
+        path = root / directory / f"explain-analyze-{name}.txt"
+        if path.exists():
+            lines = path.read_text(encoding="utf-8").splitlines()
+            matched = [OPERATOR_LINE.match(line) for line in lines]
+            total = sum(float(m.group(4)) for m in matched if m) or 1.0
+            for line, m in zip(lines, matched):
+                if m:
+                    key = f"ea.{tag}.{m.group(2)}"
+                    facts[f"{key}.share"] = f"{float(m.group(4)) / total * 100:.0f}"
+                    facts[f"{key}.rows"] = comma(int(m.group(3)))
+                    facts[f"{key}.time"] = ms(float(m.group(4)))
+                    facts[f"{key}.peak"] = m.group(5)
+                est = re.search(r"#(\d+) .*? est=(\d+) rows=(\d+)", line)
+                if est:
+                    facts[f"ea.{tag}.{est.group(1)}.est"] = comma(int(est.group(2)))
+        data = classified(root, directory).get(name)
+        if data:
+            facts[f"cls.{tag}.samples"] = comma(data["total"])
+            for category, share in data["share"].items():
+                facts[f"cls.{tag}.{category}"] = f"{share * 100:.0f}"
+            seen = set()
+            for t in data["top_frames"]:
+                function = t["frame"].replace("quarry::", "").replace("eval_internal::", "")
+                if (function, t["category"]) not in seen:
+                    seen.add((function, t["category"]))
+                    facts[f"frame.{tag}.{function}.{t['category']}"] = f"{t['share'] * 100:.1f}"
+    return facts
+
+
+FACT = re.compile(r"<!-- n:([A-Za-z0-9_.:+$ -]+?) -->(.*?)<!-- /n -->")
+
+
 BLOCKS = {
     "gaps": render_gaps,
     "profile-categories": render_profile_categories,
@@ -379,7 +484,15 @@ def render_file(text, root, name):
             raise KeyError(f"{name}: unknown table '{block}'; known: {', '.join(sorted(BLOCKS))}")
         return match.group(1) + BLOCKS[block](root) + "\n" + match.group(4)
 
-    return MARKER.sub(replace, text)
+    text = MARKER.sub(replace, text)
+    facts = build_facts(root)
+
+    def substitute(match):
+        if match.group(1) not in facts:
+            raise KeyError(f"{name}: no result produces the prose number '{match.group(1)}'")
+        return f"<!-- n:{match.group(1)} -->{facts[match.group(1)]}<!-- /n -->"
+
+    return FACT.sub(substitute, text)
 
 
 def main(argv=None):
