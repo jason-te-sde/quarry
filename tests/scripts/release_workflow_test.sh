@@ -163,6 +163,17 @@ if [ "$expressions" -ne $((allowed + key)) ] || [ "$key" -ne 1 ]; then
     "$(grep -nF '${{' "$workflow")"
 fi
 in_jobs "gh is given its token where it is called" 'GH_TOKEN: ${{ github.token }}' publish
+# The token that can write belongs to the one step that calls gh. In the environment of the job
+# (indented six spaces) it would be there when the scripts of the tagged commit run.
+cases=$((cases + 1))
+if grep -Eq '^ {6}GH_(TOKEN|REPO):' "$workflow"; then
+  fail "GH_TOKEN is in the environment of the whole job, not of the step that creates the release" \
+    "$(grep -nE '^ {6}GH_(TOKEN|REPO):' "$workflow")"
+fi
+cases=$((cases + 1))
+if ! grep -Eq '^ {10}GH_TOKEN: ' "$workflow"; then
+  fail "no step has GH_TOKEN in its own environment"
+fi
 in_jobs "gh is told the repository" 'GH_REPO: ${{ github.repository }}' publish
 in_jobs "the write token is not left in the checkout" 'persist-credentials: false' publish
 

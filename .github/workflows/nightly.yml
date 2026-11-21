@@ -12,10 +12,30 @@ env:
   ARROW_VERSION: "26.0.1"
 
 jobs:
+  # A scheduled run has no webhook payload (GitHub documents none for the `schedule` event), so
+  # `github.event.repository` is empty there and a comparison with it would be true while the
+  # repository is private. The visibility is asked of the API instead.
+  visibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      public: ${{ steps.ask.outputs.public }}
+    steps:
+      - id: ask
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = "false" ]; then
+            echo "public=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "public=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # 5,000 seeds instead of the 300 of every push. Scheduled runs of a private repository are metered,
   # so the job runs only once the repository is public.
   differential-nightly:
-    if: github.event.repository.private == false
+    needs: visibility
+    if: needs.visibility.outputs.public == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:

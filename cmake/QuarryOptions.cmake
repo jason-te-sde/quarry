@@ -4,7 +4,6 @@
 
 option(QUARRY_BUILD_TESTS "Build the unit tests" ${PROJECT_IS_TOP_LEVEL})
 option(QUARRY_BUILD_TOOLS "Build the command-line tools" ON)
-option(QUARRY_BUILD_BENCH "Build the benchmarks" OFF)
 option(QUARRY_FUZZ "Build the fuzz targets (Clang only)" OFF)
 option(QUARRY_COVERAGE "Instrument the build for coverage" OFF)
 

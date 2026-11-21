@@ -41,7 +41,3 @@ if(QUARRY_FUZZ)
   endif()
   add_subdirectory(fuzz)
 endif()
-
-if(QUARRY_BUILD_BENCH)
-  add_subdirectory(bench)
-endif()

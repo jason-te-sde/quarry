@@ -4,6 +4,10 @@ on:
   push:
     branches: [main, 'feat/**']
   pull_request:
+  # Started by hand from the Actions page or `gh workflow run ci.yml --ref main`. A re-run of an
+  # earlier run keeps that run's event payload, in which a repository that was private then is still
+  # private; a new dispatch reads the repository as it is now. RELEASING.md says when to use it.
+  workflow_dispatch:
 
 permissions:
   contents: read

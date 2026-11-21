@@ -13,14 +13,42 @@ quarry uses [Semantic Versioning](https://semver.org/), with one thing to know.
   its changelog entry.
 
 The version is written in one place, `project(quarry VERSION x.y.z ...)` in `CMakeLists.txt`.
+`pyproject.toml` describes the Python tooling only, is never published, and carries `0.0.0` on purpose.
 
 ## To make a release
 
 1. **Check that the release branch is green**: every job of CI on the commit you mean to release, and
    `scripts/preflight.sh` on your machine if you have one that can run it. The macOS job and the nightly
    differential job run only while the repository is public (they are metered while it is private), so
-   for the first release they have not yet run on this code: make the repository public, let them run on
-   `main`, and fix what they find before tagging.
+   for the first release they have not yet run on this code. Go public, then do the three things
+   below, and fix what they find before tagging.
+
+   - **Turn on private vulnerability reporting.** [SECURITY.md](SECURITY.md) names it as the only
+     channel, and it is off by default on a repository owned by a user. Once the repository is public:
+
+     ```
+     gh api -X PUT repos/jason-te-sde/quarry/private-vulnerability-reporting
+     gh api repos/jason-te-sde/quarry/private-vulnerability-reporting
+     ```
+
+     The second command must print `{"enabled":true}`. Then open the repository's Security tab in a
+     browser that is signed out, or signed in as someone else, and check that it offers "Report a
+     vulnerability".
+   - **Run CI on `main`.** Pushing does nothing now (the commit is already on `main`), and re-running an
+     old run reuses its event payload, in which the repository was still private, so the macOS job would
+     stay skipped. Start a new run:
+
+     ```
+     gh workflow run ci.yml --ref main
+     gh run list --workflow ci.yml --branch main --limit 1
+     gh run view RUN_ID
+     ```
+
+     Confirm that `build-test-macos` ran and passed, including its `nm -C` object check
+     (`scripts/check-objects.sh`), and that every other job passed.
+   - **Run the nightly workflow once**: `gh workflow run nightly.yml --ref main`. Its `visibility` job
+     asks the API whether the repository is public, so the differential job runs only then.
+
 2. **Write the changelog.** In [CHANGELOG.md](CHANGELOG.md) rename `[Unreleased]` to the new version
    with today's date, start a new empty `[Unreleased]`, and fix the compare links at the bottom. List
    what a user of the library, the command line or the SQL needs to know: changes of behaviour first, then
