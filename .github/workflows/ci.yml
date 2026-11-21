@@ -407,6 +407,41 @@ jobs:
       - name: Numbers in the README and the docs
         run: bash scripts/check-readme-numbers.sh
 
+  # What a newcomer does, on a checkout that holds nothing but the commit: every command block that
+  # the README marks `<!-- run -->` is run by scripts/run-readme-blocks.sh, after Arrow is built by
+  # scripts/build_arrow.sh. The checkout is a fresh clone into an empty workspace, so a file that was
+  # never committed, or a build step that only works on a developer's machine, fails here. The Arrow
+  # build is cached the way the other jobs cache it; the README's own build and run steps are not.
+  clean-clone:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CC: gcc-14
+      CXX: g++-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++-14 gcc-14
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Restore Arrow
+        id: arrow-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/opt/arrow-${{ env.ARROW_VERSION }}-gcc-14
+          key: arrow-${{ env.ARROW_VERSION }}-gcc-14-${{ runner.os }}-${{ hashFiles('scripts/build_arrow.sh') }}
+
+      - name: Build Arrow
+        if: steps.arrow-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build_arrow.sh
+
+      - name: Run the commands of the README
+        run: bash scripts/run-readme-blocks.sh
+
   # The macOS job runs only once the repository is public: macOS runners are metered while it is
   # private.
   build-test-macos:
