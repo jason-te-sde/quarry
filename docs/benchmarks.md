@@ -114,6 +114,20 @@ only checks that the harness works and publishes no numbers, records the load bu
   refusal as its result and is not dropped or retried with a bigger budget.
 - `smoke`: the `main` suite on the SF0.01 test data, for CI.
 
+## Addendum: the suites are re-run after the join-estimate fix
+
+The first SF1 results showed Q5 at 50 times DuckDB's time. The cause was a known estimator bug: the
+join estimate treated two foreign keys to `nation` as a unique key, so the greedy order built an
+18-million-row hash table (`docs/where-time-goes.md`, ADR 0005). The fix caps a key pair's divisor at
+its value domain from the Parquet min/max. All three suites (`main`, `ablation`, `spill`) are re-run
+on the fixed commit, one at a time, and each table cites its own commit. The protocol is otherwise
+unchanged, with these differences in what a result records: before timing, every variant of quarry
+the suite runs has its answer checked against DuckDB's (not only the `main` configuration), and a
+figure that was never measured (the warm-up and load flag of a cell that timed out or crashed) is
+`null`, not zero or false. The earlier results are kept, under `bench/results/before-join-estimate-fix/`,
+and are labelled "before the join-estimate fix" wherever they are cited. Nothing about how a run
+is timed, repeated or judged has changed.
+
 ## What gets recorded
 
 `uv run bench/run_bench.py --suite {main,ablation,spill,smoke} --data <dir>` writes
