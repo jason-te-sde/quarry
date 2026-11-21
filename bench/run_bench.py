@@ -6,6 +6,10 @@
 The ablation suite also reads the sorted export, by default the sibling `<data>-sorted`
 (bench/data/sf1-sorted). The smoke suite is the main suite on the SF0.01 test data, for CI.
 
+Before any cell is timed, every variant of quarry the suite runs (batch sizes, rules off, memory
+limits) is run once and its answer compared with DuckDB's, so a wrong answer is never published as a
+time. A variant whose check hits the execution timeout is recorded as a timeout without being timed.
+
 The script refuses (exit status 2) to start, and again to write, when `git status --porcelain`
 lists anything outside bench/results/: a result must come from committed code and a committed
 protocol. Every path in a result is relative to the repository root.
@@ -268,6 +272,8 @@ def summarize(raw):
         result["status"] = "ok"
     runs = [r["ns"] / 1e6 for r in raw["runs"]]
     loads = [r["load_1m"] for r in raw["runs"]]
+    warmup = raw.get("warmup")  # null when the warm-up itself failed
+    entries = ([warmup] if warmup else []) + raw["runs"]
     if result["status"] == "ok":
         result.update(
             {
@@ -277,13 +283,14 @@ def summarize(raw):
                 "max_ms": round(max(runs), 3),
             }
         )
+    # A figure that was never measured is null, never a zero that reads like a measurement.
     result.update(
         {
-            "warmup_ms": round(raw["warmup"]["ns"] / 1e6, 3),
-            "warmup_load_1m": raw["warmup"]["load_1m"],
+            "warmup_ms": round(warmup["ns"] / 1e6, 3) if warmup else None,
+            "warmup_load_1m": warmup["load_1m"] if warmup else None,
             "load_1m": loads,
             "waited_s": [r["waited_s"] for r in raw["runs"]],
-            "load_flag": any(e["load_1m"] > LOAD_LIMIT for e in [raw["warmup"], *raw["runs"]]),
+            "load_flag": any(e["load_1m"] > LOAD_LIMIT for e in entries) if entries else None,
             "peak_rss_bytes": raw["peak_rss_bytes"],
             "idle_rss_bytes": raw["idle_rss_bytes"],
             "rows": raw["rows"],
@@ -293,6 +300,13 @@ def summarize(raw):
         if key in raw:
             result[key] = raw[key]
     return result
+
+
+def failed_cell(spec, status, error):
+    """The record of a cell that has no timing. Nothing was measured, so the load flag is null."""
+    record = {k: spec[k] for k in ("engine", "config", "query", "dataset", "group")}
+    record.update({"status": status, "error": error, "load_flag": None})
+    return record
 
 
 def run_cell(spec, ctx):
@@ -318,64 +332,102 @@ def run_cell(spec, ctx):
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.communicate()
-            cell_result = {k: spec[k] for k in ("engine", "config", "query", "dataset", "group")}
-            cell_result.update(
-                {
-                    "status": "timeout",
-                    "error": f"the process was killed after the cell limit of {ctx['cell_limit_s']} s",
-                    "load_flag": False,
-                }
+            return failed_cell(
+                spec, "timeout", f"the process was killed after the cell limit of {ctx['cell_limit_s']} s"
             )
-            return cell_result
         done = subprocess.CompletedProcess(command, proc.returncode, "", stderr)
         if not out.exists():
             # The process died without writing its timing: a crash is the result of its cell.
             code = done.returncode
             how = f"killed by signal {-code}" if code < 0 else f"exit status {code}"
-            cell_result = {k: spec[k] for k in ("engine", "config", "query", "dataset", "group")}
-            cell_result.update(
-                {
-                    "status": "crashed",
-                    "error": f"the process died without writing a timing ({how}): {done.stderr.strip()[-400:]}",
-                    "load_flag": False,
-                }
+            return failed_cell(
+                spec, "crashed",
+                f"the process died without writing a timing ({how}): {done.stderr.strip()[-400:]}",
             )
-            return cell_result
         raw = json.loads(out.read_text())
     cell_result = {k: spec[k] for k in ("engine", "config", "query", "dataset", "group")}
     cell_result.update(summarize(raw))
     return cell_result
 
 
-# The check before the numbers: quarry's answers equal DuckDB's.
+# The check before the numbers: every variant of quarry answers as DuckDB does.
 
 
-def check_answers(ctx):
+def variants(specs):
+    """The distinct (dataset, query, quarry arguments) of the quarry cells, in cell order."""
+    seen = {}
+    for spec in specs:
+        if spec["engine"] == "quarry":
+            seen.setdefault(variant_key(spec), spec)
+    return list(seen.values())
+
+
+def variant_key(spec):
+    return (spec["dataset"], spec["query"], tuple(spec["args"]))
+
+
+def check_answers(ctx, specs):
+    """Runs each variant once, with the arguments its cells use, and compares the answer with
+    DuckDB's on the same data. A wrong answer raises AnswerMismatch before anything is timed.
+
+    Returns {variant key: reason} for the variants whose check did not finish within the execution
+    timeout (or the cell limit): the caller records those cells as timeouts without timing them, as
+    the timed run would end the same way. A variant that fails otherwise (a memory limit that
+    refuses the query, say) is not in the result: its timed run records the failure as its cell."""
     sys.path.insert(0, str(SCRIPT_ROOT / "tests" / "differential"))
     import compare
     import duckdb
 
-    con = duckdb.connect()
-    con.execute("SET threads = 1")
-    for path in sorted(Path(ctx["data"]["default"]).glob("*.parquet")):
-        literal = path.as_posix().replace("'", "''")
-        con.execute(f"CREATE VIEW {path.stem} AS SELECT * FROM read_parquet('{literal}')")
-    for query in QUERIES:
-        sql = ctx["sql"][query]
-        cursor = con.execute(sql)
-        expected = compare.from_duckdb(cursor.description, cursor.fetchall())
-        done = subprocess.run(
-            [str(ctx["quarry"]), "query", "--data", str(ctx["data"]["default"]), "-c", sql, "--format", "json"],
-            cwd=ctx["root"], capture_output=True, text=True,
-        )
+    connections = {}
+    expected_answers = {}
+
+    def expected(dataset, query):
+        if dataset not in connections:
+            con = duckdb.connect()
+            con.execute("SET threads = 1")
+            for path in sorted(Path(ctx["data"][dataset]).glob("*.parquet")):
+                literal = path.as_posix().replace("'", "''")
+                con.execute(f"CREATE VIEW {path.stem} AS SELECT * FROM read_parquet('{literal}')")
+            connections[dataset] = con
+        if (dataset, query) not in expected_answers:
+            cursor = connections[dataset].execute(ctx["sql"][query])
+            expected_answers[(dataset, query)] = compare.from_duckdb(cursor.description, cursor.fetchall())
+        return expected_answers[(dataset, query)]
+
+    unfinished = {}
+    todo = variants(specs)
+    for n, spec in enumerate(todo, 1):
+        label = f"{spec['query']} {spec['config']} ({spec['dataset']})"
+        print(f"[check {n}/{len(todo)}] {label}", file=sys.stderr)
+        command = [
+            str(ctx["quarry"]), "query", "--data", str(ctx["data"][spec["dataset"]]), "-c", ctx["sql"][spec["query"]],
+            "--format", "json", "--timeout", f"{EXECUTION_TIMEOUT_S}s", *spec["args"],
+        ]
+        try:
+            done = subprocess.run(
+                command, cwd=ctx["root"], capture_output=True, text=True, timeout=ctx["cell_limit_s"]
+            )
+        except subprocess.TimeoutExpired:
+            unfinished[variant_key(spec)] = f"the answer check was killed after the cell limit of {ctx['cell_limit_s']} s"
+            continue
         if done.returncode != 0:
-            raise RuntimeError(f"quarry failed on {query}: {done.stderr.strip()}")
+            if "timeout of" in done.stderr:
+                unfinished[variant_key(spec)] = (
+                    f"the answer check ended at the execution timeout of {EXECUTION_TIMEOUT_S} s"
+                )
+            continue
+        want = expected(spec["dataset"], spec["query"])
         actual = compare.parse_quarry(done.stdout)
-        approx = frozenset(i for i, (_, t) in enumerate(expected.columns) if t == "DOUBLE")
-        problems = compare.diff(expected, actual, ordered=True, approx=approx)
+        approx = frozenset(i for i, (_, t) in enumerate(want.columns) if t == "DOUBLE")
+        ordered = spec["query"] != AGG_QUERY  # the aggregate has no ORDER BY
+        problems = compare.diff(want, actual, ordered=ordered, approx=approx)
         if problems:
-            raise AnswerMismatch(f"{query}: the answer of quarry differs from DuckDB's:\n  " + "\n  ".join(problems))
-    con.close()
+            raise AnswerMismatch(
+                f"{label}: the answer of quarry differs from DuckDB's:\n  " + "\n  ".join(problems)
+            )
+    for con in connections.values():
+        con.close()
+    return unfinished
 
 
 class AnswerMismatch(Exception):
@@ -460,18 +512,23 @@ def main(argv=None):
         }
         document["queries"][AGG_QUERY]["sql"] = AGG_SQL
 
-        if args.suite in ("main", "smoke"):
-            print("checking quarry's answers against DuckDB's ...", file=sys.stderr)
-            check_answers(ctx)
-
         specs = suite_cells(args.suite)
+        print("checking quarry's answers against DuckDB's ...", file=sys.stderr)
+        unfinished = check_answers(ctx, specs)
+
         for n, spec in enumerate(specs, 1):
-            result = run_cell(spec, ctx)
+            if variant_key(spec) in unfinished:
+                result = failed_cell(
+                    spec, "timeout", unfinished[variant_key(spec)] + "; the cell was not timed"
+                )
+            else:
+                result = run_cell(spec, ctx)
             document["cells"].append(result)
             shown = f"{result['median_ms']:.1f} ms" if result["status"] == "ok" else result["status"]
+            loads = [result.get("warmup_load_1m"), *result.get("load_1m", [])]
             print(
                 f"[{n}/{len(specs)}] {spec['engine']} {spec['config']} {spec['query']} ({spec['dataset']}): "
-                f"{shown}, load {max([result.get('warmup_load_1m', 0), *result.get('load_1m', [])])}",
+                f"{shown}, load {max([x for x in loads if x is not None], default='n/a')}",
                 file=sys.stderr,
             )
 

@@ -217,11 +217,12 @@ struct RepeatOptions {
 // One warm-up and `repeat` measured executions of the same query in this process. The time of a run
 // is from the SQL text in hand to the whole result materialised as a table: the clock stops before
 // the table is released. The JSON is written whether the runs succeed or not; a failure is its
-// "error" and the exit status is 1.
+// "error" and the exit status is 1. A warm-up that failed is `"warmup":null`, not a zero time.
 int RunRepeated(quarry::Engine& engine, const std::string& sql, const RepeatOptions& opts) {
   const int64_t idle_rss = PeakRssBytes();
   std::vector<Timing> runs;
   Timing warmup;
+  bool have_warmup = false;  // false when the warm-up itself failed: its time is then `null`
   int64_t pool_peak = 0;
   int64_t scan_pool_peak = 0;
   int64_t spilled = 0;
@@ -246,6 +247,7 @@ int RunRepeated(quarry::Engine& engine, const std::string& sql, const RepeatOpti
     rows = result->table->num_rows();
     if (i == 0) {
       warmup = t;
+      have_warmup = true;
     } else {
       runs.push_back(t);
     }
@@ -256,7 +258,7 @@ int RunRepeated(quarry::Engine& engine, const std::string& sql, const RepeatOpti
     json +=
         "\"error\":" + JsonString(error) + ",\"timed_out\":" + (timed_out ? "true" : "false") + ",";
   }
-  json += "\"warmup\":" + TimingJson(warmup) + ",\"runs\":[";
+  json += "\"warmup\":" + (have_warmup ? TimingJson(warmup) : std::string("null")) + ",\"runs\":[";
   for (size_t i = 0; i < runs.size(); ++i) json += (i ? "," : "") + TimingJson(runs[i]);
   char tail[320];
   std::snprintf(tail, sizeof(tail),

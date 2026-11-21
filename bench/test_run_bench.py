@@ -18,6 +18,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import run_bench  # noqa: E402
+
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "bench" / "run_bench.py"
 DATA = REPO / "tests" / "data" / "tpch-sf0.01"
@@ -262,6 +265,7 @@ class RunBenchTest(unittest.TestCase):
             self.assertEqual(cell["status"], "timeout")
             self.assertIn("cell limit", cell["error"])
             self.assertNotIn("median_ms", cell)
+            self.assertIsNone(cell["load_flag"])
 
     def test_a_crashed_cell_is_recorded_and_the_other_cells_are_kept(self):
         wrapper = self.tools / "quarry-that-crashes-on-q5"
@@ -279,8 +283,109 @@ class RunBenchTest(unittest.TestCase):
         crashed = [c for c in cells if c["status"] == "crashed"]
         self.assertEqual([(c["engine"], c["query"]) for c in crashed], [("quarry", "q5")])
         self.assertIn("signal 9", crashed[0]["error"])
+        self.assertIsNone(crashed[0]["load_flag"])
         self.assertNotIn("median_ms", crashed[0])
         self.assertEqual(sum(c["status"] == "ok" for c in cells), 11)
+
+    # Every variant's answer is checked, not only the default configuration.
+
+    def sorted_copy(self):
+        path = Path(self.temp.name) / "sorted"
+        shutil.copytree(DATA, path)
+        return path
+
+    def test_a_wrong_answer_in_an_ablation_variant_stops_the_run_and_writes_nothing(self):
+        wrapper = self.tools / "quarry-wrong-at-a-small-batch"
+        write_script(
+            wrapper,
+            "import os, sys\n"
+            "if '--format' in sys.argv and '--batch-size' in sys.argv:\n"
+            "    print('{\"columns\":[{\"name\":\"x\",\"type\":\"INTEGER\"}],\"rows\":[[1]]}')\n"
+            "    sys.exit(0)\n"
+            f"os.execv({str(QUARRY)!r}, [{str(QUARRY)!r}] + sys.argv[1:])\n",
+        )
+        done = self.run_bench(suite="ablation", quarry=wrapper, extra=("--sorted-data", str(self.sorted_copy())))
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("differs from DuckDB", done.stderr)
+        self.assertIn("batch_size=", done.stderr)
+        self.assertEqual(self.results(), [])
+
+    def test_a_wrong_answer_under_a_memory_limit_stops_the_run_and_writes_nothing(self):
+        wrapper = self.tools / "quarry-wrong-under-a-limit"
+        write_script(
+            wrapper,
+            "import os, sys\n"
+            "if '--format' in sys.argv and '--memory-limit' in sys.argv:\n"
+            "    print('{\"columns\":[{\"name\":\"x\",\"type\":\"INTEGER\"}],\"rows\":[[1]]}')\n"
+            "    sys.exit(0)\n"
+            f"os.execv({str(QUARRY)!r}, [{str(QUARRY)!r}] + sys.argv[1:])\n",
+        )
+        done = self.run_bench(suite="spill", quarry=wrapper)
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("differs from DuckDB", done.stderr)
+        self.assertEqual(self.results(), [])
+
+    def test_a_variant_whose_check_hits_the_timeout_is_recorded_and_not_timed(self):
+        wrapper = self.tools / "quarry-that-times-out-at-64mb"
+        write_script(
+            wrapper,
+            "import os, sys\n"
+            "if '--format' in sys.argv and '64MB' in sys.argv:\n"
+            "    sys.stderr.write('quarry: query cancelled: the timeout of 600000 ms was exceeded\\n')\n"
+            "    sys.exit(1)\n"
+            f"os.execv({str(QUARRY)!r}, [{str(QUARRY)!r}] + sys.argv[1:])\n",
+        )
+        done = self.run_bench(suite="spill", quarry=wrapper)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        cells = json.loads(self.results()[0].read_text())["cells"]
+        self.assertEqual(len(cells), 12)
+        for c in cells:
+            if c["config"] == "64MB":
+                self.assertEqual(c["status"], "timeout")
+                self.assertIn("not timed", c["error"])
+                self.assertIsNone(c["load_flag"])
+                self.assertNotIn("median_ms", c)
+            else:
+                self.assertEqual(c["status"], "ok", c)
+
+    # What a failed first run records: null, not a zero that reads like a time.
+
+    def test_summarize_writes_null_for_a_warmup_that_never_ran(self):
+        raw = {
+            "error": "query cancelled: the timeout of 600000 ms was exceeded", "timed_out": True, "warmup": None,
+            "runs": [], "idle_rss_bytes": 1, "peak_rss_bytes": 2, "rows": 0,
+        }
+        result = run_bench.summarize(raw)
+        self.assertEqual(result["status"], "timeout")
+        self.assertIsNone(result["warmup_ms"])
+        self.assertIsNone(result["warmup_load_1m"])
+        self.assertIsNone(result["load_flag"])
+
+    def test_the_duckdb_worker_writes_a_null_warmup_after_a_first_run_failure(self):
+        out = Path(self.temp.name) / "worker.json"
+        done = subprocess.run(
+            [sys.executable, str(REPO / "bench" / "duckdb_worker.py"), "--data", str(DATA), "--sql",
+             "SELECT * FROM no_such_table", "--repeat", "1", "--out", str(out)],
+            capture_output=True, text=True, timeout=120,
+        )
+        self.assertEqual(done.returncode, 1, done.stderr)
+        raw = json.loads(out.read_text())
+        self.assertIn("error", raw)
+        self.assertIsNone(raw["warmup"])
+        self.assertEqual(raw["runs"], [])
+
+    def test_quarry_writes_a_null_warmup_when_its_first_run_times_out(self):
+        out = Path(self.temp.name) / "quarry.json"
+        sql = (REPO / "tests" / "tpch" / "queries" / "q5.sql").read_text()
+        done = subprocess.run(
+            [str(QUARRY), "query", "--data", str(DATA), "-c", sql, "--repeat", "1", "--timing-json", str(out),
+             "--timeout", "1ms"],
+            capture_output=True, text=True, timeout=120,
+        )
+        self.assertEqual(done.returncode, 1, done.stderr)
+        raw = json.loads(out.read_text())
+        self.assertTrue(raw["timed_out"])
+        self.assertIsNone(raw["warmup"])
 
 
 if __name__ == "__main__":

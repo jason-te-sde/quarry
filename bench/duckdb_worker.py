@@ -94,7 +94,7 @@ def main():
         result["timed_out"] = timed_out
     result.update(
         {
-            "warmup": warmup or {"ns": 0, "load_1m": 0.0, "waited_s": 0.0},
+            "warmup": warmup,  # None (null) when the first execution failed
             "runs": runs,
             "idle_rss_bytes": idle_rss,
             "peak_rss_bytes": peak_rss_bytes(),
