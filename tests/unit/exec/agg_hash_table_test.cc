@@ -48,6 +48,40 @@ void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::align_val_t) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+// The nothrow forms too, so that no allocation is made by a runtime's own operator new (a sanitizer
+// supplies one for each form) and released by the free() above.
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
+  try {
+    return CountedAlloc(size, alignof(std::max_align_t));
+  } catch (...) {
+    return nullptr;
+  }
+}
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept {
+  try {
+    return CountedAlloc(size, alignof(std::max_align_t));
+  } catch (...) {
+    return nullptr;
+  }
+}
+void* operator new(std::size_t size, std::align_val_t align, const std::nothrow_t&) noexcept {
+  try {
+    return CountedAlloc(size, static_cast<std::size_t>(align));
+  } catch (...) {
+    return nullptr;
+  }
+}
+void* operator new[](std::size_t size, std::align_val_t align, const std::nothrow_t&) noexcept {
+  try {
+    return CountedAlloc(size, static_cast<std::size_t>(align));
+  } catch (...) {
+    return nullptr;
+  }
+}
+void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
+void operator delete[](void* p, const std::nothrow_t&) noexcept { std::free(p); }
+void operator delete(void* p, std::align_val_t, const std::nothrow_t&) noexcept { std::free(p); }
+void operator delete[](void* p, std::align_val_t, const std::nothrow_t&) noexcept { std::free(p); }
 
 namespace quarry {
 namespace {
