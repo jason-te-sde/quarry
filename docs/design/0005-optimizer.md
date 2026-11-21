@@ -71,12 +71,19 @@ Fixed constants, not statistics:
 | anything else | 1 |
 
 A scan produces `row_count` times the product of its filters' selectivities. A join of `L` and `R`
-on key pairs produces `|L| |R| / B` for the first pair, where `B` is the row count of the smaller of
-the two base tables the pair's columns come from, and a tenth of that for each further pair. The
-base table is the scan the key column traces back to through filters, sorts, joins and plain column
-projections; when it does not trace back to a scan, the side's own estimate stands in. A residual
-multiplies by its selectivity. A global aggregate produces one row, a grouped one a tenth of its
-input (at least one); that figure is only printed, never compared.
+on key pairs produces `|L| |R| / D` for the first pair and a tenth of that for each further pair.
+The divisor is
+
+    D = max(1, min(B, W))
+
+where `B` is the row count of the smaller of the two base tables the pair's columns come from, and
+`W` is the larger of the two columns' domain bounds. A column's domain bound is `max - min + 1` over
+the row-group min/max statistics of the scan it traces to, for an integer column. It is infinite
+when the column is not an integer, a row group has no statistics for it, or it does not trace to a
+scan. The base table and the column are found by following the key through filters, sorts, joins
+and plain column projections; when it does not trace back to a scan, the side's own estimate stands
+in for `B`. A residual multiplies by its selectivity. A global aggregate produces one row, a grouped
+one a tenth of its input (at least one); that figure is only printed, never compared.
 
 ### Why a PK-FK formula
 
@@ -86,10 +93,23 @@ equals the size of the referencing side, which is `|L| |R| / (rows of the table 
 Dividing by the smaller base table is that. It needs only row counts, which the Parquet footer
 gives for free.
 
+The PK-FK assumption fails when both columns are foreign keys to a third table. Q5's
+`c_nationkey = s_nationkey` is that: both columns hold the 25 nation keys, so every customer
+matches about a 25th of the suppliers. At SF1 the formula divided by 10,000 (the supplier table) and
+estimated 15,000 rows where the join produces 12,093,991, and the greedy order built an
+18-million-row hash table. A column cannot hold more distinct values than its range, and the range
+is in the footer, so `W` caps the divisor: for those two columns it is 25. For a real primary-key
+pair the range is at least the table size and the divisor is unchanged (`l_orderkey = o_orderkey`:
+1.5M orders over a 6M range, divisor 1.5M). The spec allows row counts and min/max, so this adds
+no histogram and no sampling.
+
 ### Known failure cases
 
-- A join that is not PK-FK: a many-to-many join on a non-key column is estimated far too small, and
-  the greedy order may then put it too early.
+- A many-to-many join on a column with a wide range is still estimated as PK-FK: the cap catches
+  only a range smaller than the smaller table. Sparse keys (a range far wider than the number of
+  values) and a filter that narrows the range without moving the min and max both defeat it.
+- Statistics are per row group over the whole table; a filter on the key column does not narrow
+  the domain.
 - Correlated predicates: selectivities multiply as if independent.
 - A filter on the key column of the smaller table does not reduce the divisor, so the estimate
   after filtering one side can be off by the filter's selectivity either way.

@@ -15,25 +15,36 @@ namespace quarry {
 // Anything else keeps everything (1.0); a literal FALSE or NULL keeps nothing.
 double EstimateSelectivity(const BoundExpr& predicate);
 
-// The estimated size of a join result, given the sizes of its inputs and, for each key pair, the
-// row count of the smaller of the two base tables the pair's columns come from (the PK-FK
-// assumption: the smaller table holds the key, every row of the larger finds one match).
+// The estimated size of a join result, given the sizes of its inputs and one divisor per key pair
+// (see JoinKeyDivisor).
 //   no key pair:  l * r
-//   otherwise:    l * r / key_base_rows[0], times 0.1 for every further pair
-double EstimateJoinRows(double left_rows, double right_rows,
-                        const std::vector<double>& key_base_rows);
+//   otherwise:    l * r / divisors[0], times 0.1 for every further pair
+double EstimateJoinRows(double left_rows, double right_rows, const std::vector<double>& divisors);
 
 // The row count of a key expression's base table: the table of the scan the key's first column
 // comes from, followed through filters, sorts, limits, joins and plain column projections. When the
 // column does not come from a scan, the estimate of `side` itself.
 double KeyBaseRows(const LogicalNode& side, const BoundExpr& key);
 
+// An upper bound on the number of distinct values of a key's first column: `max - min + 1` over the
+// Parquet row-group statistics of the scan it comes from, for an integer column. Infinity when the
+// column is not an integer, a row group has no statistics for it, or it does not trace to a scan.
+double KeyDomain(const LogicalNode& side, const BoundExpr& key);
+
+// The divisor of one key pair:
+//   max(1, min(smaller of the two base row counts, larger of the two domain bounds))
+// The first term is the PK-FK assumption (the smaller table holds the key, every row of the larger
+// finds one match). The second keeps a pair of columns that both draw from a small domain, such as
+// two foreign keys to `nation`, from being treated as a unique key.
+double JoinKeyDivisor(const LogicalNode& left, const BoundExpr& left_key, const LogicalNode& right,
+                      const BoundExpr& right_key);
+
 // The estimated number of rows `node` produces:
 //   Scan       row_count * the product of the selectivities of its filters
 //   Filter     child * selectivity       Project, Sort  child       Limit  min(child, n)
-//   Join       EstimateJoinRows over its key pairs, times the selectivity of its residual
-//   Cross      the product of its children
-//   Aggregate  1 without groups, otherwise a tenth of the child (at least 1); never used to
+//   Join       EstimateJoinRows over the JoinKeyDivisor of its key pairs, times the selectivity of
+//   its residual Cross      the product of its children Aggregate  1 without groups, otherwise a
+//   tenth of the child (at least 1); never used to
 //              choose between plans
 double EstimateRows(const LogicalNode& node);
 

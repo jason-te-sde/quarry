@@ -6,7 +6,10 @@
 #include <string>
 #include <vector>
 
+#include "binder/binder.h"
+#include "binder/catalog.h"
 #include "planner/rules.h"
+#include "support/parquet_fixture.h"
 #include "support/planner_helpers.h"
 
 namespace quarry {
@@ -75,6 +78,41 @@ TEST(JoinOrderTest, Q5StartsFromTheSmallestFilteredRelation) {
   EXPECT_EQ(order[2], "supplier");
   EXPECT_NE(order, (std::vector<std::string>{"customer", "orders", "lineitem", "supplier", "nation",
                                              "region"}));
+}
+
+TEST(JoinOrderTest, AForeignKeyToForeignKeyEdgeIsNotTreatedAsAKeyJoin) {
+  // a has 100 rows, b and c 1000 each. a_id = c_aid is a primary-key join (estimate 1000);
+  // a_k = b_k joins two columns that both hold only 0..4, so it is many-to-many (estimate 20000).
+  // Dividing by the smaller table (100) would tie the two at 1000 and FROM order would put b first.
+  testing::TempDir dir;
+  std::vector<int32_t> a_id, a_k, b_k, c_aid;
+  for (int i = 0; i < 100; ++i) {
+    a_id.push_back(i + 1);
+    a_k.push_back(i % 5);
+  }
+  for (int i = 0; i < 1000; ++i) {
+    b_k.push_back(i % 5);
+    c_aid.push_back(1 + i % 100);
+  }
+  Catalog catalog;
+  ASSERT_TRUE(catalog
+                  .AddTable("a", {testing::WriteParquet(dir.path() / "a.parquet",
+                                                        {testing::Int32Column("a_id", a_id),
+                                                         testing::Int32Column("a_k", a_k)})})
+                  .ok());
+  ASSERT_TRUE(catalog
+                  .AddTable("b", {testing::WriteParquet(dir.path() / "b.parquet",
+                                                        {testing::Int32Column("b_k", b_k)})})
+                  .ok());
+  ASSERT_TRUE(catalog
+                  .AddTable("c", {testing::WriteParquet(dir.path() / "c.parquet",
+                                                        {testing::Int32Column("c_aid", c_aid)})})
+                  .ok());
+  auto bound = ParseAndBind("SELECT a_id FROM a, b, c WHERE a_k = b_k AND a_id = c_aid", catalog);
+  ASSERT_TRUE(bound.ok()) << bound.status().ToString();
+  auto plan = Optimize(std::move(*bound), Disabling({"pick_build_side"}));
+  ASSERT_TRUE(plan.ok()) << plan.status().ToString();
+  EXPECT_THAT(ScanOrder(**plan), ElementsAre("a", "c", "b"));
 }
 
 TEST(JoinOrderTest, WithOrderJoinsDisabledTheJoinOrderIsTheFromOrder) {

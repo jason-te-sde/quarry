@@ -19,7 +19,7 @@ struct Edge {
   size_t b = 0;
   ExprPtr key_a;
   ExprPtr key_b;
-  double base_rows = 1.0;  // the smaller base table of the two key columns
+  double divisor = 1.0;  // JoinKeyDivisor of the two key columns
 };
 
 void ScanNames(const LogicalNode& node, std::vector<std::string>* out) {
@@ -104,8 +104,7 @@ arrow::Result<JoinTree> BuildJoinTree(std::vector<LogicalPlan> relations,
       edge.key_b = std::move(c->children[1]);
       ShiftColumns(edge.key_a.get(), -static_cast<int>(offsets[a]));
       ShiftColumns(edge.key_b.get(), -static_cast<int>(offsets[b]));
-      edge.base_rows = std::max(1.0, std::min(KeyBaseRows(*relations[a], *edge.key_a),
-                                              KeyBaseRows(*relations[b], *edge.key_b)));
+      edge.divisor = JoinKeyDivisor(*relations[a], *edge.key_a, *relations[b], *edge.key_b);
       edges.push_back(std::move(edge));
     } else {
       leftover.push_back(std::move(c));
@@ -155,7 +154,7 @@ arrow::Result<JoinTree> BuildJoinTree(std::vector<LogicalPlan> relations,
       if (placed[r]) continue;
       std::vector<double> bases;
       for (const Edge& e : edges) {
-        if ((e.a == r && placed[e.b]) || (e.b == r && placed[e.a])) bases.push_back(e.base_rows);
+        if ((e.a == r && placed[e.b]) || (e.b == r && placed[e.a])) bases.push_back(e.divisor);
       }
       if (bases.empty()) continue;  // not connected yet
       if (!greedy) {
