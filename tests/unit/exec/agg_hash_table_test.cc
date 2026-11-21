@@ -3,11 +3,51 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <cstdlib>
 #include <map>
+#include <new>
 #include <string>
 #include <vector>
 
 #include "support/arrays.h"
+
+// Counts the bytes that the C++ heap hands out (operator new) while a test has the counter on. The
+// pool a caller passes to Finish does not see a std::vector, and the defect this guards, a Finish
+// that built full-size vectors of every group on each call, allocated exactly those.
+namespace {
+std::atomic<bool> g_count_heap{false};
+std::atomic<int64_t> g_heap_bytes{0};
+
+void* CountedAlloc(std::size_t size, std::size_t align) {
+  if (g_count_heap.load(std::memory_order_relaxed)) {
+    g_heap_bytes.fetch_add(static_cast<int64_t>(size), std::memory_order_relaxed);
+  }
+  void* p = align <= alignof(std::max_align_t)
+                ? std::malloc(size == 0 ? 1 : size)
+                : std::aligned_alloc(align, (size + align - 1) / align * align);
+  if (p == nullptr) throw std::bad_alloc();
+  return p;
+}
+}  // namespace
+
+void* operator new(std::size_t size) { return CountedAlloc(size, alignof(std::max_align_t)); }
+void* operator new[](std::size_t size) { return CountedAlloc(size, alignof(std::max_align_t)); }
+void* operator new(std::size_t size, std::align_val_t align) {
+  return CountedAlloc(size, static_cast<std::size_t>(align));
+}
+void* operator new[](std::size_t size, std::align_val_t align) {
+  return CountedAlloc(size, static_cast<std::size_t>(align));
+}
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete[](void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::align_val_t) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
 
 namespace quarry {
 namespace {
@@ -375,9 +415,11 @@ TEST(AggHashTableTest, ASpillableTableReportsOverBudgetInsteadOfFailingAndClearR
 }
 
 // Handing the groups out in batches calls Finish once per batch. It must work on the groups it is
-// asked for: counting what it allocates (every temporary comes from the pool it is given) shows
-// the cost without a clock. With work on every group per call, 200,000 groups in batches of 64
-// allocate several gigabytes; proportional to the groups they allocate a few megabytes.
+// asked for. Two counts show the cost without a clock: what Finish allocates from the pool it is
+// given, and what the C++ heap hands out during the loop (the temporaries of Finish itself). With
+// work on every group per call, 200,000 groups in batches of 64 allocate several gigabytes from the
+// heap; proportional to the groups they allocate a few megabytes. The heap count is the one that
+// catches a Finish that builds a std::vector of every group on each call.
 TEST(AggHashTableTest, FinishingInBatchesAllocatesInProportionToTheGroupsFinished) {
   constexpr int64_t kGroups = 200000;
   constexpr int64_t kBatch = 64;
@@ -398,21 +440,31 @@ TEST(AggHashTableTest, FinishingInBatchesAllocatesInProportionToTheGroupsFinishe
                   .ok());
   arrow::ProxyMemoryPool pool(arrow::default_memory_pool());
   int64_t finished = 0;
+  g_heap_bytes = 0;
+  g_count_heap = true;
   for (int64_t first = 0; first < kGroups; first += kBatch) {
     auto columns = table.Finish(first, std::min(kBatch, kGroups - first), &pool);
     ASSERT_TRUE(columns.ok()) << columns.status().ToString();
     finished += (*columns)[0]->length();
   }
+  g_count_heap = false;
   EXPECT_EQ(finished, kGroups);
   EXPECT_LT(pool.total_bytes_allocated(), kGroups * 400)
       << "Finish allocated in proportion to all the groups on every call";
+  EXPECT_LT(g_heap_bytes.load(), kGroups * 400)
+      << "Finish built something the size of every group on each call";
   // The partial states written when spilling are cut the same way.
   arrow::ProxyMemoryPool partial_pool(arrow::default_memory_pool());
+  g_heap_bytes = 0;
+  g_count_heap = true;
   for (int64_t first = 0; first < kGroups; first += kBatch) {
     auto columns = table.FinishPartial(first, std::min(kBatch, kGroups - first), &partial_pool);
     ASSERT_TRUE(columns.ok()) << columns.status().ToString();
   }
+  g_count_heap = false;
   EXPECT_LT(partial_pool.total_bytes_allocated(), kGroups * 400);
+  EXPECT_LT(g_heap_bytes.load(), kGroups * 400)
+      << "FinishPartial built something the size of every group on each call";
 }
 
 // Another operator can hold the whole budget (the join below an aggregate does). The table then
