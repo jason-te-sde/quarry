@@ -27,13 +27,13 @@ The deadline and the cancel flag are checked once per batch an operator returns,
 that build a hash table, split a partition or merge spilled files, and between pieces of 2^20
 rows (or 65,536 batches) when a hash join, sort or top-N joins its materialised input into one
 column. They are not checked inside one Parquet row group read, inside the single copy that joins
-those pieces, while the operators release their state after the query ended (freeing a build side of
-millions of one-row arrays took about 30 ms per second of build time at SF1-scale row counts, in
-proportion to the state), or while the operating system pages memory in and out: a query that has
+those pieces, while the operators release their state after the query ended (on a self-join of 2 million one-row
+arrays, about 1 GB of state, the process ended 51 ms after a 1 s deadline and 167 ms after a 5 s one:
+the delay grew with the state; not measured at larger sizes), or while the operating system pages memory in and out: a query that has
 outgrown physical memory can overrun its timeout by however long one such step takes under swapping. With a
 very small `--batch-size` the build side of a join is one array per row and its memory is far
-larger than the budget charges for it, which is how that happens (a batch size of 1 on Q5 at SF1
-reached a 68 GB footprint).
+larger than the budget charges for it, which is how that happens (the first ablation attempt, with
+batch size 1 on Q5 before the join-estimate fix, swapped and was killed; `benchmarks.md` records it).
 
 ## Where spill files go
 
