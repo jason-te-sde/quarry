@@ -147,7 +147,7 @@ class TopNOperator final : public Operator {
     std::vector<std::shared_ptr<arrow::Array>> all(width);
     for (size_t c = 0; c < width; ++c) {
       ARROW_ASSIGN_OR_RAISE(
-          all[c], ConcatenateArrays(parts[c], node_.output_types[c].ToArrow(), context_->pool));
+          all[c], ConcatenateArrays(*context_, parts[c], node_.output_types[c].ToArrow()));
     }
     std::vector<std::shared_ptr<arrow::Array>> all_keys(node_.keys.size());
     std::vector<SortColumn> sort_columns;
@@ -157,8 +157,8 @@ class TopNOperator final : public Operator {
       if (key.expr->kind == ExprKind::kColumn) {
         column.array = all[static_cast<size_t>(key.expr->column_index)];
       } else {
-        ARROW_ASSIGN_OR_RAISE(
-            all_keys[k], ConcatenateArrays(key_parts[k], key.expr->type.ToArrow(), context_->pool));
+        ARROW_ASSIGN_OR_RAISE(all_keys[k],
+                              ConcatenateArrays(*context_, key_parts[k], key.expr->type.ToArrow()));
         column.array = all_keys[k];
       }
       column.ascending = key.ascending;

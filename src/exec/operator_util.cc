@@ -35,6 +35,32 @@ arrow::Result<std::shared_ptr<arrow::Array>> ConcatenateArrays(
   return arrow::Concatenate(parts, pool);
 }
 
+arrow::Result<std::shared_ptr<arrow::Array>> ConcatenateArrays(
+    const ExecContext& context, const std::vector<std::shared_ptr<arrow::Array>>& parts,
+    const std::shared_ptr<arrow::DataType>& type) {
+  std::vector<std::shared_ptr<arrow::Array>> pieces;
+  std::vector<std::shared_ptr<arrow::Array>> group;
+  int64_t group_rows = 0;
+  const auto flush = [&]() -> arrow::Status {
+    ARROW_RETURN_NOT_OK(CheckInterrupted(context));
+    ARROW_ASSIGN_OR_RAISE(auto piece, ConcatenateArrays(group, type, context.pool));
+    pieces.push_back(std::move(piece));
+    group.clear();
+    group_rows = 0;
+    return arrow::Status::OK();
+  };
+  for (const auto& part : parts) {
+    group.push_back(part);
+    group_rows += part->length();
+    if (group_rows >= kConcatenateChunkRows || group.size() >= kConcatenateChunkParts) {
+      ARROW_RETURN_NOT_OK(flush());
+    }
+  }
+  if (!group.empty() || pieces.empty()) ARROW_RETURN_NOT_OK(flush());
+  ARROW_RETURN_NOT_OK(CheckInterrupted(context));
+  return ConcatenateArrays(pieces, type, context.pool);
+}
+
 Batch MakeBatch(std::vector<std::shared_ptr<arrow::Array>> columns, int64_t length) {
   Batch batch;
   batch.columns = std::move(columns);

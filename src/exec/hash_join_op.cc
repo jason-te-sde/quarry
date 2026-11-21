@@ -286,8 +286,7 @@ class HashJoinOperator final : public Operator {
       parts.reserve(build_parts_.size());
       for (const Batch& part : build_parts_) parts.push_back(part.columns[c]);
       ARROW_ASSIGN_OR_RAISE(
-          auto column,
-          ConcatenateArrays(parts, node_.build->output_types[c].ToArrow(), context_->pool));
+          auto column, ConcatenateArrays(*context_, parts, node_.build->output_types[c].ToArrow()));
       build_columns_.push_back(std::move(column));
     }
     build_parts_.clear();

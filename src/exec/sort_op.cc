@@ -81,8 +81,7 @@ class SortOperator final : public Operator {
     columns_.clear();
     for (size_t c = 0; c < width; ++c) {
       ARROW_ASSIGN_OR_RAISE(
-          auto column,
-          ConcatenateArrays(parts[c], node_.output_types[c].ToArrow(), context_->pool));
+          auto column, ConcatenateArrays(*context_, parts[c], node_.output_types[c].ToArrow()));
       columns_.push_back(std::move(column));
     }
     std::vector<SortColumn> sort_columns;
@@ -92,9 +91,8 @@ class SortOperator final : public Operator {
       if (key.expr->kind == ExprKind::kColumn) {
         column.array = columns_[static_cast<size_t>(key.expr->column_index)];
       } else {
-        ARROW_ASSIGN_OR_RAISE(
-            column.array,
-            ConcatenateArrays(key_parts[k], key.expr->type.ToArrow(), context_->pool));
+        ARROW_ASSIGN_OR_RAISE(column.array,
+                              ConcatenateArrays(*context_, key_parts[k], key.expr->type.ToArrow()));
       }
       column.ascending = key.ascending;
       column.nulls_first = key.nulls_first;

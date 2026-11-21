@@ -281,5 +281,25 @@ TEST_F(LongQueryTest, ATimeoutEndsTheQueryAsCancelledAndNamesTheTimeout) {
   EXPECT_LT(elapsed.count(), 1000);
 }
 
+// Batch size 1 turns a build side into one tiny batch per row. The timeout must still end the query
+// as Cancelled, within the timeout plus a margin that does not grow with the build side.
+TEST(LargeBuildTimeoutTest, ATimeoutOnALargeBuildSideAtBatchSizeOneEndsAsCancelled) {
+  TempDir dir;
+  std::vector<int64_t> ids;
+  for (int64_t i = 0; i < 3000000; ++i) ids.push_back(i);
+  const auto file = WriteParquet(dir.path() / "wide.parquet", {Int64Column("id", ids)});
+  EngineOptions options;
+  options.batch_size = 1;
+  options.timeout = std::chrono::milliseconds(300);
+  Engine engine(options);
+  ASSERT_TRUE(engine.RegisterTable("wide", {file}).ok());
+  const Clock::time_point start = Clock::now();
+  auto result = engine.Execute("SELECT COUNT(*) FROM wide a JOIN wide b ON a.id = b.id");
+  const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start);
+  ASSERT_FALSE(result.ok()) << "the query was meant to outlast its timeout";
+  EXPECT_TRUE(result.status().IsCancelled()) << result.status().ToString();
+  EXPECT_LT(elapsed.count(), 300 + 5000) << "cancelled after " << elapsed.count() << " ms";
+}
+
 }  // namespace
 }  // namespace quarry

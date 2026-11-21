@@ -21,6 +21,18 @@ A limit much smaller than the largest group table or build side makes the first 
 partitions that are still too large and the second split rewrites them: `spilled=` several times the
 input is the sign. Raise the limit until it drops.
 
+## How promptly a timeout or Ctrl-C ends a query
+
+The deadline and the cancel flag are checked once per batch an operator returns, inside the loops
+that build a hash table, split a partition or merge spilled files, and between pieces of 2^20
+rows (or 65,536 batches) when a hash join, sort or top-N joins its materialised input into one
+column. They are not checked inside one Parquet row group read, inside the single copy that joins
+those pieces, or while the operating system pages memory in and out: a query that has outgrown
+physical memory can overrun its timeout by however long one such step takes under swapping. With a
+very small `--batch-size` the build side of a join is one array per row and its memory is far
+larger than the budget charges for it, which is how that happens (a batch size of 1 on Q5 at SF1
+reached a 68 GB footprint).
+
 ## Where spill files go
 
 In a directory `quarry-spill-XXXXXX` created under `EngineOptions::spill_parent`, or the system

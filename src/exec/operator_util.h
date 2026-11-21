@@ -24,6 +24,20 @@ arrow::Result<std::shared_ptr<arrow::Array>> ConcatenateArrays(
     const std::vector<std::shared_ptr<arrow::Array>>& parts,
     const std::shared_ptr<arrow::DataType>& type, arrow::MemoryPool* pool);
 
+// The most rows, and the most parts, that ConcatenateArrays below joins between two checks for
+// cancellation.
+constexpr int64_t kConcatenateChunkRows = int64_t{1} << 20;
+constexpr size_t kConcatenateChunkParts = size_t{1} << 16;
+
+// Like the overload above, but checks for cancellation and the deadline between pieces: the parts
+// are joined in groups of at most kConcatenateChunkRows rows and kConcatenateChunkParts parts, and
+// the groups are then joined. A build side made of millions of tiny batches (a batch size of 1) no
+// longer runs to the end of one Arrow call before the timeout is looked at. The final join of the
+// groups is a single call, a copy of the column.
+arrow::Result<std::shared_ptr<arrow::Array>> ConcatenateArrays(
+    const ExecContext& context, const std::vector<std::shared_ptr<arrow::Array>>& parts,
+    const std::shared_ptr<arrow::DataType>& type);
+
 // A batch of `length` rows whose columns are `columns`.
 Batch MakeBatch(std::vector<std::shared_ptr<arrow::Array>> columns, int64_t length);
 

@@ -4,10 +4,13 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <string>
 #include <vector>
 
 #include "exec/build_operators.h"
+#include "exec/operator_util.h"
 #include "support/exec_helpers.h"
 #include "support/parquet_fixture.h"
 #include "support/vector_source.h"
@@ -644,6 +647,63 @@ TEST(BuildOperatorsTest, APassedDeadlineIsCancelledAndNamesTheTimeout) {
   EXPECT_TRUE(batches.status().IsCancelled());
   EXPECT_NE(batches.status().message().find("timeout of 1 ms"), std::string::npos)
       << batches.status().message();
+}
+
+// ---- joining a large build side checks for cancellation ----
+
+std::vector<std::shared_ptr<arrow::Array>> ManyInt64Parts(int parts, int64_t rows_each) {
+  std::vector<std::shared_ptr<arrow::Array>> out;
+  for (int p = 0; p < parts; ++p) {
+    std::vector<int64_t> values(static_cast<size_t>(rows_each));
+    for (int64_t i = 0; i < rows_each; ++i) values[static_cast<size_t>(i)] = p * rows_each + i;
+    out.push_back(Int64Array(values));
+  }
+  return out;
+}
+
+TEST(ConcatenateTest, JoinsGroupsInOrderWhenThereAreMoreRowsThanOneChunk) {
+  const int64_t rows_each = kConcatenateChunkRows / 2 + 1;  // two parts make a group
+  const auto parts = ManyInt64Parts(5, rows_each);
+  TestContext context;
+  auto joined = ConcatenateArrays(context.context, parts, arrow::int64());
+  ASSERT_TRUE(joined.ok()) << joined.status().ToString();
+  ASSERT_EQ((*joined)->length(), 5 * rows_each);
+  const auto& values = static_cast<const arrow::Int64Array&>(**joined);
+  for (const int64_t i :
+       {int64_t{0}, rows_each - 1, rows_each, 3 * rows_each + 7, 5 * rows_each - 1}) {
+    EXPECT_EQ(values.Value(i), i) << i;
+  }
+}
+
+TEST(ConcatenateTest, NoPartsGiveAnEmptyArrayAndOnePartIsReturnedAsIs) {
+  TestContext context;
+  auto empty = ConcatenateArrays(context.context, {}, arrow::int64());
+  ASSERT_TRUE(empty.ok());
+  EXPECT_EQ((*empty)->length(), 0);
+  const auto parts = ManyInt64Parts(1, 10);
+  auto one = ConcatenateArrays(context.context, parts, arrow::int64());
+  ASSERT_TRUE(one.ok());
+  EXPECT_EQ(one->get(), parts[0].get());
+}
+
+TEST(ConcatenateTest, ACancelledQueryEndsBetweenGroupsNotAtTheEnd) {
+  const auto parts = ManyInt64Parts(4, kConcatenateChunkRows);  // four groups
+  TestContext context;
+  std::atomic<bool> cancelled{true};
+  context.context.cancelled = &cancelled;
+  auto joined = ConcatenateArrays(context.context, parts, arrow::int64());
+  ASSERT_FALSE(joined.ok());
+  EXPECT_TRUE(joined.status().IsCancelled()) << joined.status().ToString();
+}
+
+TEST(ConcatenateTest, APassedDeadlineEndsTheJoinAsCancelled) {
+  const auto parts = ManyInt64Parts(3, kConcatenateChunkRows);
+  TestContext context;
+  context.context.timeout = std::chrono::milliseconds(5);
+  context.context.deadline = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+  auto joined = ConcatenateArrays(context.context, parts, arrow::int64());
+  ASSERT_FALSE(joined.ok());
+  EXPECT_TRUE(joined.status().IsCancelled());
 }
 
 // ---- memory accounting of sliced batches ----
