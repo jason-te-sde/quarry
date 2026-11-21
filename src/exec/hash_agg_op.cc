@@ -182,7 +182,8 @@ class HashAggregateOperator final : public Operator {
   // Merges the partial states of one file into the (empty) table. When they do not fit, splits the
   // file on the next bits of the hash instead and queues the pieces.
   arrow::Status MergePartition(const Work& work) {
-    ARROW_ASSIGN_OR_RAISE(auto reader, SpillReader::Open(work.path, context_->fault));
+    ARROW_ASSIGN_OR_RAISE(
+        auto reader, SpillReader::Open(work.path, context_->fault, context_->pool));
     const size_t key_count = node_.groups.size();
     std::unique_ptr<SpillPartitions> split;
     for (;;) {

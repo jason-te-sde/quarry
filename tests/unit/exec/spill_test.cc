@@ -97,6 +97,22 @@ TEST(SpillTest, EveryTypeRoundTripsWithItsNulls) {
   EXPECT_EQ(actual, expected);
 }
 
+TEST(SpillTest, BatchesReadBackAreAllocatedFromTheGivenPool) {
+  TempDir dir;
+  const fs::path file = dir.path() / "pool.spill";
+  auto writer = SpillWriter::Open(file, AllTypesSchema());
+  ASSERT_TRUE(writer.ok());
+  ASSERT_TRUE((*writer)->Write(AllTypesBatch(10)).ok());
+  ASSERT_TRUE((*writer)->Finish().ok());
+
+  arrow::ProxyMemoryPool pool(arrow::default_memory_pool());
+  auto reader = SpillReader::Open(file, {}, &pool);
+  ASSERT_TRUE(reader.ok()) << reader.status().ToString();
+  auto batch = (*reader)->Next();
+  ASSERT_TRUE(batch.ok() && batch->has_value());
+  EXPECT_GT(pool.max_memory(), 0) << "the batch was allocated elsewhere";
+}
+
 TEST(SpillTest, AFileWithoutRowsReadsAsEmpty) {
   TempDir dir;
   const fs::path file = dir.path() / "empty.spill";

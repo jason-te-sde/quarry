@@ -70,8 +70,10 @@ class SpillWriter {
 // Reads a file a SpillWriter wrote, one record batch at a time.
 class SpillReader {
  public:
-  static arrow::Result<std::unique_ptr<SpillReader>> Open(const std::filesystem::path& path,
-                                                          SpillFault fault = {});
+  // The batches read are allocated from `pool`.
+  static arrow::Result<std::unique_ptr<SpillReader>> Open(
+      const std::filesystem::path& path, SpillFault fault = {},
+      arrow::MemoryPool* pool = arrow::default_memory_pool());
   ~SpillReader() = default;
   SpillReader(const SpillReader&) = delete;
   SpillReader& operator=(const SpillReader&) = delete;

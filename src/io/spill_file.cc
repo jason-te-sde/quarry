@@ -95,12 +95,15 @@ arrow::Status SpillWriter::Finish() {
 }
 
 arrow::Result<std::unique_ptr<SpillReader>> SpillReader::Open(const std::filesystem::path& path,
-                                                              SpillFault fault) {
+                                                              SpillFault fault,
+                                                              arrow::MemoryPool* pool) {
   std::unique_ptr<SpillReader> reader(new SpillReader());
   reader->fault_ = std::move(fault);
-  ARROW_ASSIGN_OR_RAISE(reader->source_, arrow::io::ReadableFile::Open(path.string()));
+  ARROW_ASSIGN_OR_RAISE(reader->source_, arrow::io::ReadableFile::Open(path.string(), pool));
+  auto options = arrow::ipc::IpcReadOptions::Defaults();
+  options.memory_pool = pool;
   ARROW_ASSIGN_OR_RAISE(reader->reader_,
-                        arrow::ipc::RecordBatchStreamReader::Open(reader->source_));
+                        arrow::ipc::RecordBatchStreamReader::Open(reader->source_, options));
   return reader;
 }
 

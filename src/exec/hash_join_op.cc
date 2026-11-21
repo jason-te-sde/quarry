@@ -268,7 +268,8 @@ class HashJoinOperator final : public Operator {
   arrow::Status LoadPartition(const Work& work) {
     ResetTable();
     sink_depth_ = work.depth + 1;
-    ARROW_ASSIGN_OR_RAISE(auto reader, SpillReader::Open(work.build_path, context_->fault));
+    ARROW_ASSIGN_OR_RAISE(
+        auto reader, SpillReader::Open(work.build_path, context_->fault, context_->pool));
     for (;;) {
       ARROW_RETURN_NOT_OK(CheckInterrupted(*context_));
       ARROW_ASSIGN_OR_RAISE(std::optional<Batch> batch, reader->Next());
@@ -279,11 +280,13 @@ class HashJoinOperator final : public Operator {
     RemoveSpillFile(work.build_path);
     if (build_sink_ == nullptr) {
       ARROW_RETURN_NOT_OK(ConcatenateBuild());
-      ARROW_ASSIGN_OR_RAISE(probe_reader_, SpillReader::Open(work.probe_path, context_->fault));
+      ARROW_ASSIGN_OR_RAISE(
+          probe_reader_, SpillReader::Open(work.probe_path, context_->fault, context_->pool));
       probe_path_ = work.probe_path;
       return arrow::Status::OK();
     }
-    ARROW_ASSIGN_OR_RAISE(auto probe_reader, SpillReader::Open(work.probe_path, context_->fault));
+    ARROW_ASSIGN_OR_RAISE(
+        auto probe_reader, SpillReader::Open(work.probe_path, context_->fault, context_->pool));
     ARROW_ASSIGN_OR_RAISE(
         auto probe_sink,
         SplitProbe([&probe_reader]() { return probe_reader->Next(); }, sink_depth_));
