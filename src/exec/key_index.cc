@@ -90,6 +90,16 @@ int64_t KeyIndex::Insert(std::span<const uint8_t> key, uint64_t hash) {
   return id;
 }
 
+void KeyIndex::Clear() {
+  // Swapping with fresh vectors of the same allocator releases the storage without an assignment.
+  PoolVector<Slot>(kInitialSlots, Slot{}, slots_.get_allocator()).swap(slots_);
+  mask_ = kInitialSlots - 1;
+  PoolVector<uint8_t>(arena_.get_allocator()).swap(arena_);
+  PoolVector<uint64_t> offsets(offsets_.get_allocator());
+  offsets.push_back(0);
+  offsets.swap(offsets_);
+}
+
 void KeyIndex::Rehash(size_t slots) {
   PoolVector<Slot> bigger(slots, Slot{}, slots_.get_allocator());
   const size_t mask = bigger.size() - 1;

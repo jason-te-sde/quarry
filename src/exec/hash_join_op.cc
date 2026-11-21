@@ -31,7 +31,7 @@ class HashJoinOperator final : public Operator {
     reservation_ =
         std::make_unique<Reservation>(*context.budget, ReservationOwner("HashJoin", node_.id));
     charged_ = std::make_unique<ChargedBytes>(reservation_.get());
-    table_ = JoinHashTable({}, context.pool);
+    table_ = std::make_unique<JoinHashTable>(KeyHasher{}, context.pool);
     ARROW_RETURN_NOT_OK(probe_->Open(context));
     return build_->Open(context);
   }
@@ -41,7 +41,7 @@ class HashJoinOperator final : public Operator {
       ARROW_RETURN_NOT_OK(Build());
       built_ = true;
     }
-    if (!spilled_ && table_.rows() == 0) return std::optional<Batch>();  // joins nothing
+    if (!spilled_ && table_->rows() == 0) return std::optional<Batch>();  // joins nothing
     for (;;) {
       ARROW_RETURN_NOT_OK(CheckInterrupted(*context_));
       if (!probing_) {
@@ -56,7 +56,7 @@ class HashJoinOperator final : public Operator {
           ARROW_ASSIGN_OR_RAISE(auto column, Evaluate(*key, probe_batch_, context_->pool));
           keys.push_back(std::move(column));
         }
-        ARROW_RETURN_NOT_OK(table_.Lookup(keys, probe_batch_.length, &first_));
+        ARROW_RETURN_NOT_OK(table_->Lookup(keys, probe_batch_.length, &first_));
         row_ = 0;
         match_ = probe_batch_.length > 0 ? first_[0] : JoinHashTable::kNoRow;
         probing_ = true;
@@ -125,12 +125,12 @@ class HashJoinOperator final : public Operator {
       // slice and the rest of the batch go to the partition files.
       int64_t refused = 0;
       const auto charge = [&](int64_t growth) {
-        const int64_t needed = payload_bytes_ + table_.memory_bytes() + growth;
+        const int64_t needed = payload_bytes_ + table_->memory_bytes() + growth;
         if (charged_->TrySet(needed)) return true;
         refused = needed;
         return false;
       };
-      ARROW_ASSIGN_OR_RAISE(const bool inserted, table_.Insert(key_slice, length, charge));
+      ARROW_ASSIGN_OR_RAISE(const bool inserted, table_->Insert(key_slice, length, charge));
       if (!inserted) {
         if (context_->spill == nullptr) return charged_->Set(refused);
         ARROW_RETURN_NOT_OK(StartSinking(refused));
@@ -139,7 +139,7 @@ class HashJoinOperator final : public Operator {
       }
       payload_bytes_ += BatchBytes(slice);
       build_parts_.push_back(std::move(slice));
-      const int64_t needed = payload_bytes_ + table_.memory_bytes();
+      const int64_t needed = payload_bytes_ + table_->memory_bytes();
       if (charged_->TrySet(needed)) continue;
       // Over budget. Without a spill directory that is an error, as before.
       if (context_->spill == nullptr) return charged_->Set(needed);
@@ -296,7 +296,7 @@ class HashJoinOperator final : public Operator {
   }
 
   void ResetTable() {
-    table_ = JoinHashTable({}, context_->pool);
+    table_ = std::make_unique<JoinHashTable>(KeyHasher{}, context_->pool);
     build_parts_.clear();
     build_columns_.clear();
     payload_bytes_ = 0;
@@ -333,7 +333,7 @@ class HashJoinOperator final : public Operator {
       }
       probe_rows.push_back(static_cast<uint32_t>(row_));
       build_rows.push_back(match_);
-      match_ = table_.Next(match_);
+      match_ = table_->Next(match_);
     }
     if (row_ >= probe_batch_.length) probing_ = false;
     if (probe_rows.empty()) return std::optional<Batch>();
@@ -392,7 +392,7 @@ class HashJoinOperator final : public Operator {
   ExecContext* context_ = nullptr;
   std::unique_ptr<Reservation> reservation_;
   std::unique_ptr<ChargedBytes> charged_;
-  JoinHashTable table_;
+  std::unique_ptr<JoinHashTable> table_;
   std::vector<Batch> build_parts_;  // the build rows in the table, until they are concatenated
   int64_t payload_bytes_ = 0;
   std::vector<std::shared_ptr<arrow::Array>> build_columns_;

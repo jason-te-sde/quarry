@@ -43,6 +43,8 @@ class KeyIndex {
   // (the slot array of a rehash, the arena and the offsets), on top of memory_bytes(): while the
   // old storage is copied, both exist.
   int64_t GrowthBytes(int64_t keys, int64_t key_bytes) const;
+  // Forgets every key and returns the storage.
+  void Clear();
   // Makes that room now, so that the Inserts that follow do not allocate.
   void Reserve(int64_t keys, int64_t key_bytes);
 

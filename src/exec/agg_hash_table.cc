@@ -766,7 +766,7 @@ void AggHashTable::MakeStates() {
 }
 
 void AggHashTable::Clear() {
-  index_ = KeyIndex(hasher_, pool_);
+  index_.Clear();
   MakeStates();
   groups_ = 0;
   states_capacity_ = 0;
