@@ -132,6 +132,29 @@ figure that was never measured (the warm-up and load flag of a cell that timed o
 and are labelled "before the join-estimate fix" wherever they are cited. Nothing about how a run
 is timed, repeated or judged has changed.
 
+## Addendum: the suites are re-run after the fixes of the whole-branch review
+
+Four changes land on the measured paths, so the three suites are re-run on the commit that carries
+them:
+
+- the scan asks the Parquet reader for leaf columns instead of Arrow field positions, and checks the
+  cancel flag and the deadline once per row group and once per batch it reads;
+- the hash tables' storage (key index, key arena, aggregate states, join chains) is allocated from the
+  query's memory pool, and a table pays for a growth before it allocates it, so the allocator and the
+  order of allocations on the join and aggregate paths are different;
+- `AVG` and `COUNT` produce their output per batch of groups instead of recomputing every group for
+  each batch (the high-cardinality aggregate and Q1 are the measured queries that use them);
+- batches read back from spill files are allocated from the query's pool.
+
+All three suites (`main`, `ablation`, `spill`) are re-run on that commit, one at a time, on a quiet
+machine, and each table cites its own commit. The call graphs and operator times under
+`bench/results/profile/` are taken again for every query, with the procedure above, because the
+allocator change touches every query that joins or aggregates and the scan change every query. The
+protocol is otherwise unchanged: how a run is timed, repeated and judged is as before. The earlier
+results are kept under `bench/results/before-review-fixes/` (and their profiles under
+`bench/results/profile/before-review-fixes/`) and are labelled "before the fixes of the whole-branch
+review" wherever they are cited.
+
 ## What gets recorded
 
 `uv run bench/run_bench.py --suite {main,ablation,spill,smoke} --data <dir>` writes
