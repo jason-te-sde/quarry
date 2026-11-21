@@ -66,6 +66,59 @@ The first release.
   table as if one were a primary key, which made the greedy order build a very large hash table on
   Q5. A key pair's divisor is now capped at the value range read from the Parquet min/max. The earlier
   results are kept under `bench/results/before-join-estimate-fix/`.
+- A scan read the wrong Parquet column after a `STRUCT`, `MAP` or other nested column: it passed Arrow
+  field positions to the reader, which takes leaf columns, so `SELECT y` could return another column's
+  values without an error. Fields now map to leaves through the schema manifest, row-group statistics
+  use the same mapping (so pruning works on such files), and selecting the nested column itself is still
+  refused.
+- A scan whose filter matches nothing could not be interrupted: Ctrl-C and `--timeout` were checked
+  only when an operator returned a batch, so the scan read its whole input first, and a query that
+  outlived its timeout this way succeeded. The scan now checks once per row group and per batch it
+  reads. A cancel that arrived while a query was being planned was lost; it now ends the query, and a
+  second Ctrl-C ends the `quarry` process.
+- `AVG` and `COUNT` per group were quadratic in the number of groups: every output batch recomputed
+  every group. Producing the output is now linear.
+- The memory limit measured less than it said. The hash tables' storage (key index, key arena,
+  aggregate states, join chains) is now allocated from the query's memory pool, so `pool_peak_bytes`
+  and the README's operator-pool column include it (the high-cardinality aggregate used to show
+  none), and a table pays for a growth, such as the doubled slot array of a rehash, before it
+  allocates it. Batches read back from spill files are allocated from the pool as well. What the limit
+  still does not cover is in [docs/operations.md](docs/operations.md): one row group per scan, and the
+  second copy that exists while a join or a sort concatenates its input.
+- A column left in several chunks after a row group was read is an error that names the file, not an
+  empty array; an unreadable data page names its file too.
+
+### Known issues
+
+Found before this release and not fixed in it; each is small, and none returns a wrong answer.
+
+- **Limits that are documented.** A sort that does not fit its limit stops with `resource exhausted`
+  (there is no external sort). A sort holds its input twice in the operator pool while it concatenates
+  it, so its pool peak can reach twice the limit. The strings that `MIN` and `MAX` of a `VARCHAR` keep
+  are charged but not allocated from the pool. A 257-term `AND` chain is a syntax error. `AND` and
+  `OR` evaluate both sides, so `FALSE AND <overflow>` is an error. Comparing a `DECIMAL(38,0)` with a
+  `DECIMAL(38,10)` can raise an overflow on legitimate values. Several joins that spill share one
+  budget, so an inner join can fail at depth 3 although it would fit alone.
+- **Performance.** Literals are broadcast to a full column and `IN` over constants is folded into
+  equalities, which is visible in the Q6 profile. The Q5 join order is worse than the order the query
+  is written in (see the README).
+- **Error handling in rarely used paths.** An aggregate whose state cannot be made is reported from
+  the first `Update`, not at construction; `Run` skips `Close` when `Open` fails (the destructors
+  release everything); an empty `VARCHAR` offsets buffer is dereferenced where operators never pass one;
+  `ValueOrDie` is used when a result string passes 2 GiB; `AddDirectory` is not atomic and registers a
+  directory with no Parquet file silently; destructors swallow the errors of removing spill files.
+- **Gaps in the tests.** The hygiene test does not pin every fail-closed branch; there is no test of a
+  nested join at depth 3, of Top-N spilling behaviour, of file descriptors, of a `DECIMAL` comparison
+  at 2^63 and above, or of `AddInterval` across centuries; the differential test has no floor on the
+  number of non-empty compared results; unreadable-file cases skip when run as root; the object check
+  scans the libraries and not the test executables or the binary; the SF1 Q5 join order is not pinned
+  by a test (the SF0.01 golden and a synthetic test pin the estimator).
+- **Tooling.** `scripts/gen_tpch.py` assumes `DECIMAL(p, s)` columns; the lint job builds Arrow with
+  Clang 18 only for clang-tidy; the test scripts are mode 100644 and run through `bash`;
+  `AddressSanitizer` on macOS stops inside libarrow and libparquet (see
+  [docs/testing.md](docs/testing.md)); `check_answers` of the benchmark harness does not record in the
+  result that every variant's answer was checked.
+
 
 [Unreleased]: https://github.com/jason-te-sde/quarry/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/jason-te-sde/quarry/releases/tag/v0.1.0
