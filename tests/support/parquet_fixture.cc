@@ -80,6 +80,39 @@ Column ListOfInt32Column(const std::string& name, const std::vector<std::vector<
   return Make(name, std::move(out));
 }
 
+Column StructOfInt64Column(const std::string& name, const std::vector<int64_t>& a,
+                           const std::vector<int64_t>& b) {
+  arrow::Int64Builder a_builder;
+  arrow::Int64Builder b_builder;
+  EXPECT_TRUE(a_builder.AppendValues(a).ok());
+  EXPECT_TRUE(b_builder.AppendValues(b).ok());
+  std::shared_ptr<arrow::Array> a_array;
+  std::shared_ptr<arrow::Array> b_array;
+  EXPECT_TRUE(a_builder.Finish(&a_array).ok());
+  EXPECT_TRUE(b_builder.Finish(&b_array).ok());
+  auto out = arrow::StructArray::Make({a_array, b_array}, std::vector<std::string>{"a", "b"});
+  EXPECT_TRUE(out.ok()) << out.status().ToString();
+  return Make(name, out.ValueOrDie());
+}
+
+Column MapOfStringInt64Column(
+    const std::string& name,
+    const std::vector<std::vector<std::pair<std::string, int64_t>>>& values) {
+  auto key_builder = std::make_shared<arrow::StringBuilder>();
+  auto item_builder = std::make_shared<arrow::Int64Builder>();
+  arrow::MapBuilder b(arrow::default_memory_pool(), key_builder, item_builder);
+  for (const auto& entries : values) {
+    EXPECT_TRUE(b.Append().ok());
+    for (const auto& [key, item] : entries) {
+      EXPECT_TRUE(key_builder->Append(key).ok());
+      EXPECT_TRUE(item_builder->Append(item).ok());
+    }
+  }
+  std::shared_ptr<arrow::Array> out;
+  EXPECT_TRUE(b.Finish(&out).ok());
+  return Make(name, std::move(out));
+}
+
 Column Decimal40Column(const std::string& name, const std::vector<int64_t>& hundredths) {
   arrow::Decimal256Builder b(arrow::decimal256(40, 2));
   for (const int64_t v : hundredths) EXPECT_TRUE(b.Append(arrow::Decimal256(v)).ok());

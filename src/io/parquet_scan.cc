@@ -44,16 +44,27 @@ arrow::Result<ParquetFileInfo> ReadFooter(const std::filesystem::path& path) {
   info.num_rows = metadata->num_rows();
   info.num_row_groups = metadata->num_row_groups();
 
-  // Statistics are indexed by Parquet leaf column. They line up with the Arrow fields only for a
-  // flat schema; a nested one gets no statistics rather than misattributed ones.
-  const bool flat = metadata->num_columns() == info.schema->num_fields();
+  parquet::arrow::SchemaManifest manifest;
+  ARROW_RETURN_NOT_OK(parquet::arrow::SchemaManifest::Make(
+      metadata->schema(), metadata->key_value_metadata(), parquet::default_arrow_reader_properties(),
+      &manifest));
+  if (static_cast<int>(manifest.schema_fields.size()) != info.schema->num_fields()) {
+    return arrow::Status::Invalid(path.string(), ": the Parquet schema and its Arrow form disagree");
+  }
+  info.num_leaves = metadata->num_columns();
+  for (const parquet::arrow::SchemaField& field : manifest.schema_fields) {
+    info.field_leaf.push_back(field.is_leaf() ? field.column_index : -1);
+  }
+
+  // Statistics are indexed by Parquet leaf column, not by Arrow field: a nested field has no
+  // statistics of its own, and the fields after it sit at different positions in the two.
   for (int g = 0; g < info.num_row_groups; ++g) {
     std::unique_ptr<parquet::RowGroupMetaData> group = metadata->RowGroup(g);
     RowGroupStats stats;
     stats.num_rows = group->num_rows();
-    for (int c = 0; c < info.schema->num_fields(); ++c) {
-      if (flat) {
-        stats.columns.push_back(ColumnStats(*group->ColumnChunk(c)));
+    for (const int leaf : info.field_leaf) {
+      if (leaf >= 0) {
+        stats.columns.push_back(ColumnStats(*group->ColumnChunk(leaf)));
       } else {
         stats.columns.emplace_back(std::nullopt);
       }

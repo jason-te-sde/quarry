@@ -33,6 +33,13 @@ Column FloatColumn(const std::string& name, const std::vector<float>& values);
 Column StringColumn(const std::string& name, const std::vector<std::string>& values);
 Column TimestampColumn(const std::string& name, const std::vector<int64_t>& micros);
 Column ListOfInt32Column(const std::string& name, const std::vector<std::vector<int32_t>>& values);
+// STRUCT<a BIGINT, b BIGINT>: two Parquet leaf columns under one Arrow field.
+Column StructOfInt64Column(const std::string& name, const std::vector<int64_t>& a,
+                           const std::vector<int64_t>& b);
+// MAP<VARCHAR, BIGINT>: two Parquet leaf columns (key and value) under one Arrow field.
+Column MapOfStringInt64Column(
+    const std::string& name,
+    const std::vector<std::vector<std::pair<std::string, int64_t>>>& values);
 // DECIMAL(40, 2): wider than the engine's 38 digits.
 Column Decimal40Column(const std::string& name, const std::vector<int64_t>& hundredths);
 

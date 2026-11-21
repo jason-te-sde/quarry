@@ -16,6 +16,8 @@ namespace {
 using testing::Drain;
 using testing::FindFirstScan;
 using testing::Int64Column;
+using testing::StructOfInt64Column;
+using testing::WriteParquetRowGroups;
 using testing::PlanQuery;
 using testing::RowsOf;
 using testing::StringColumn;
@@ -120,6 +122,39 @@ TEST(ScanTest, BatchesAreAtMostBatchSizeRows) {
   for (const Batch& b : *batches) EXPECT_LE(b.active_rows(), 7);
   EXPECT_EQ(RowsOf(*batches).front(), "0");
   EXPECT_EQ(RowsOf(*batches).back(), "999");
+}
+
+// Ten row groups of 100 rows: id = i, then a STRUCT of two leaves, then x = 10 i, y = 100 i. The
+// columns after the struct are Parquet leaves 3 and 4 but Arrow fields 2 and 3.
+TEST(ScanTest, RowGroupPruningUsesTheStatisticsOfTheFilteredColumnAfterANestedColumn) {
+  TempDir dir;
+  std::vector<int64_t> id;
+  std::vector<int64_t> x;
+  std::vector<int64_t> y;
+  std::vector<int64_t> a(1000, 7);
+  for (int64_t i = 0; i < 1000; ++i) {
+    id.push_back(i);
+    x.push_back(10 * i);
+    y.push_back(100 * i);
+  }
+  const auto file = WriteParquetRowGroups(
+      dir.path() / "n.parquet",
+      {Int64Column("id", id), StructOfInt64Column("s", a, a), Int64Column("x", x),
+       Int64Column("y", y)},
+      100);
+  Catalog catalog;
+  ASSERT_TRUE(catalog.AddTable("n", {file}).ok());
+
+  const ScanRun run = RunScan("SELECT id FROM n WHERE x < 1000", catalog);
+  EXPECT_EQ(run.report.row_groups_total, 10);
+  ASSERT_EQ(run.report.row_groups_read.size(), 1u);
+  EXPECT_EQ(run.report.row_groups_read[0].second, 0);
+  EXPECT_EQ(run.rows.size(), 100u);
+
+  const ScanRun on_y = RunScan("SELECT id FROM n WHERE y >= 99000", catalog);
+  ASSERT_EQ(on_y.report.row_groups_read.size(), 1u);
+  EXPECT_EQ(on_y.report.row_groups_read[0].second, 9);
+  EXPECT_EQ(on_y.rows.size(), 10u);
 }
 
 TEST(ScanTest, TheScanAppliesItsPredicate) {

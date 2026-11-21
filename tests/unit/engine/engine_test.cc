@@ -16,6 +16,8 @@ namespace {
 
 using testing::Cell;
 using testing::Int64Column;
+using testing::MapOfStringInt64Column;
+using testing::StructOfInt64Column;
 using testing::StringColumn;
 using testing::TempDir;
 using testing::WriteParquet;
@@ -299,6 +301,110 @@ TEST(LargeBuildTimeoutTest, ATimeoutOnALargeBuildSideAtBatchSizeOneEndsAsCancell
   ASSERT_FALSE(result.ok()) << "the query was meant to outlast its timeout";
   EXPECT_TRUE(result.status().IsCancelled()) << result.status().ToString();
   EXPECT_LT(elapsed.count(), 300 + 5000) << "cancelled after " << elapsed.count() << " ms";
+}
+
+// A STRUCT or MAP has two Parquet leaf columns under one Arrow field, so every column after it has
+// a different number in the two. The scan must ask the reader for leaves: reading by field
+// position returns another column's values (or a struct) without an error.
+class NestedColumnsTest : public ::testing::Test {
+ protected:
+  static constexpr int64_t kRows = 1000;
+  static constexpr int64_t kGroupRows = 100;
+
+  // Distinct values per column: id = i, x = 10 i + 1, y = 100 i + 2. Ten row groups.
+  void Write(const std::string& table, testing::Column nested) {
+    std::vector<int64_t> id;
+    std::vector<int64_t> x;
+    std::vector<int64_t> y;
+    for (int64_t i = 0; i < kRows; ++i) {
+      id.push_back(i);
+      x.push_back(10 * i + 1);
+      y.push_back(100 * i + 2);
+    }
+    const auto file = testing::WriteParquetRowGroups(
+        dir_.path() / (table + ".parquet"),
+        {Int64Column("id", id), std::move(nested), Int64Column("x", x), Int64Column("y", y)},
+        kGroupRows);
+    ASSERT_TRUE(engine_.RegisterTable(table, {file}).ok());
+  }
+
+  void WriteStruct() {
+    std::vector<int64_t> a(kRows, 7);
+    std::vector<int64_t> b(kRows, 8);
+    Write("s", StructOfInt64Column("s", a, b));
+  }
+
+  void WriteMap() {
+    std::vector<std::vector<std::pair<std::string, int64_t>>> entries(kRows);
+    for (int64_t i = 0; i < kRows; ++i) entries[static_cast<size_t>(i)] = {{"k", 5}, {"j", 6}};
+    Write("m", MapOfStringInt64Column("m", entries));
+  }
+
+  std::vector<std::vector<std::string>> Run(const std::string& sql) {
+    auto result = engine_.Execute(sql);
+    EXPECT_TRUE(result.ok()) << sql << "\n" << result.status().ToString();
+    std::vector<std::vector<std::string>> rows;
+    if (!result.ok()) return rows;
+    for (int64_t r = 0; r < result->table->num_rows(); ++r) rows.push_back(Row(*result->table, r));
+    return rows;
+  }
+
+  TempDir dir_;
+  Engine engine_{EngineOptions{}};
+};
+
+TEST_F(NestedColumnsTest, ColumnsAfterAStructReadTheirOwnValues) {
+  WriteStruct();
+  EXPECT_EQ(Run("SELECT y FROM s WHERE id = 3"), (std::vector<std::vector<std::string>>{{"302"}}));
+  EXPECT_EQ(Run("SELECT x FROM s WHERE id = 3"), (std::vector<std::vector<std::string>>{{"31"}}));
+  EXPECT_EQ(Run("SELECT id, x, y FROM s WHERE id = 4"),
+            (std::vector<std::vector<std::string>>{{"4", "41", "402"}}));
+  EXPECT_EQ(Run("SELECT SUM(y) FROM s"),
+            (std::vector<std::vector<std::string>>{{std::to_string(100 * 499500 + 2000)}}));
+}
+
+TEST_F(NestedColumnsTest, ColumnsAfterAMapReadTheirOwnValues) {
+  WriteMap();
+  EXPECT_EQ(Run("SELECT y FROM m WHERE id = 3"), (std::vector<std::vector<std::string>>{{"302"}}));
+  EXPECT_EQ(Run("SELECT x FROM m WHERE id = 3"), (std::vector<std::vector<std::string>>{{"31"}}));
+  EXPECT_EQ(Run("SELECT id, y FROM m WHERE id = 9"),
+            (std::vector<std::vector<std::string>>{{"9", "902"}}));
+}
+
+TEST_F(NestedColumnsTest, AFilterOnAColumnAfterTheNestedOnePrunesAndFiltersCorrectly) {
+  WriteStruct();
+  // x = 10 i + 1 grows with the row, so x < 1000 keeps rows 0..99: the first row group only.
+  const std::string sql = "SELECT id, y FROM s WHERE x < 1000 ORDER BY id LIMIT 3";
+  EXPECT_EQ(Run(sql), (std::vector<std::vector<std::string>>{{"0", "2"}, {"1", "102"}, {"2", "202"}}));
+  EXPECT_EQ(Run("SELECT COUNT(*) FROM s WHERE x < 1000"),
+            (std::vector<std::vector<std::string>>{{"100"}}));
+  // A filter that matches nothing: statistics of the right leaf refute every row group.
+  EXPECT_EQ(Run("SELECT COUNT(*) FROM s WHERE y > 100000"),
+            (std::vector<std::vector<std::string>>{{"0"}}));
+  EXPECT_EQ(Run("SELECT COUNT(*) FROM s WHERE y >= 99902"),
+            (std::vector<std::vector<std::string>>{{"1"}}));
+}
+
+TEST_F(NestedColumnsTest, ACountOnlyScanOfAFileWhoseFirstColumnIsNestedStillCountsRows) {
+  TempDir other;
+  std::vector<int64_t> a(50, 1);
+  const auto file = testing::WriteParquet(other.path() / "n.parquet",
+                                          {StructOfInt64Column("s", a, a), Int64Column("v", a)});
+  ASSERT_TRUE(engine_.RegisterTable("n", {file}).ok());
+  EXPECT_EQ(Run("SELECT COUNT(*) FROM n"), (std::vector<std::vector<std::string>>{{"50"}}));
+}
+
+TEST_F(NestedColumnsTest, SelectingTheNestedColumnItselfIsRefused) {
+  WriteStruct();
+  auto result = engine_.Execute("SELECT s FROM s");
+  ASSERT_FALSE(result.ok());
+  EXPECT_NE(result.status().message().find("column s"), std::string::npos)
+      << result.status().message();
+  WriteMap();
+  result = engine_.Execute("SELECT m FROM m");
+  ASSERT_FALSE(result.ok());
+  EXPECT_NE(result.status().message().find("column m"), std::string::npos)
+      << result.status().message();
 }
 
 }  // namespace

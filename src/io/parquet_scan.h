@@ -21,8 +21,9 @@ struct ColumnMinMax {
   int64_t null_count = 0;
 };
 
-// Statistics of one row group. A column has no entry (std::nullopt) when the file recorded no
-// usable minimum and maximum for it, or when its type has no ordering that Arrow scalars express.
+// Statistics of one row group, one entry per Arrow field. A field has no entry (std::nullopt) when
+// the file recorded no usable minimum and maximum for it, when it is nested, or when its type has
+// no ordering that Arrow scalars express.
 struct RowGroupStats {
   int64_t num_rows = 0;
   std::vector<std::optional<ColumnMinMax>> columns;
@@ -30,6 +31,13 @@ struct RowGroupStats {
 
 struct ParquetFileInfo {
   std::shared_ptr<arrow::Schema> schema;
+  // The Parquet leaf column of each Arrow field of `schema`, or -1 when the field is nested (a
+  // struct, map or list has several leaves, or one that does not stand for the whole field). Arrow
+  // fields and Parquet leaves are numbered differently as soon as one nested field precedes
+  // another; every read and every statistic is addressed by leaf.
+  std::vector<int> field_leaf;
+  // The number of Parquet leaf columns in the file.
+  int num_leaves = 0;
   int64_t num_rows = 0;
   int num_row_groups = 0;
   std::vector<RowGroupStats> row_groups;

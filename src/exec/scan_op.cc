@@ -142,8 +142,8 @@ int64_t BufferBytes(const arrow::Array& array) {
 struct ScanOperator::FileState {
   std::filesystem::path path;
   ParquetFileInfo info;
-  std::vector<int> file_columns;        // file column of each output column; the first when none
-  std::vector<int> prune_file_columns;  // per prune conjunct
+  std::vector<int> file_columns;        // Parquet leaf of each output column; the first when none
+  std::vector<int> prune_file_columns;  // Arrow field of each prune conjunct's column, or -1
   std::vector<int> groups;              // row groups that survive pruning
   size_t next_group = 0;
   std::unique_ptr<parquet::arrow::FileReader> reader;
@@ -182,21 +182,30 @@ arrow::Status ScanOperator::OpenFile(size_t index) {
     }
     return -1;
   };
+  // Arrow fields and Parquet leaves are numbered differently after a nested field; the reader
+  // takes leaves, the statistics are per field.
+  std::vector<int> field_of_column;
   for (const PhysicalColumn& column : node_.columns) {
     const int c = column_of(column.name);
     if (c < 0) {
       return arrow::Status::Invalid(state->path.string(), " has no column ", column.name);
     }
-    state->file_columns.push_back(c);
+    const int leaf = info.field_leaf[static_cast<size_t>(c)];
+    if (leaf < 0) {
+      return arrow::Status::Invalid(state->path.string(), ": column ", column.name,
+                                    " is nested and cannot be read");
+    }
+    field_of_column.push_back(c);
+    state->file_columns.push_back(leaf);
   }
-  if (state->file_columns.empty() && info.schema->num_fields() > 0) {
+  if (state->file_columns.empty() && info.num_leaves > 0) {
     state->file_columns.push_back(0);  // a scan that needs no column still has to count rows
   }
   for (const ExprPtr& conjunct : node_.prune_conjuncts) {
     const BoundExpr& column = *conjunct->children[0];
     state->prune_file_columns.push_back(
         column.column_index >= 0 && static_cast<size_t>(column.column_index) < node_.columns.size()
-            ? state->file_columns[static_cast<size_t>(column.column_index)]
+            ? field_of_column[static_cast<size_t>(column.column_index)]
             : -1);
   }
 
