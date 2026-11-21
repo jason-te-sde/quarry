@@ -11,7 +11,7 @@ in `uv.lock`, is the reference engine for everything that compares answers.
 | Expression property test | `tests/unit/expr/eval_property_test.cc` | the vectorized evaluator disagreeing with a row-at-a-time reference evaluator (`tests/support/reference_eval.cc`) on random expression trees, selections included |
 | SQL tests | `tests/sql/*.test` | syntax and binder errors with their positions; 58 query results generated from DuckDB (`scripts/gen_goldens.py`) |
 | Plan goldens | `tests/planner/plans/` | an optimizer change that alters a plan nobody meant to alter |
-| TPC-H | `tests/tpch/` | Q1, Q3, Q5 and Q6 at scale factor 0.01 against DuckDB's answers, and the same queries under 64 KiB with spilling, whose measured memory must stay inside the budget plus a margin |
+| TPC-H | `tests/tpch/` | Q1, Q3, Q5 and Q6 at scale factor 0.01 against DuckDB's answers, and the same queries under 64 KiB with spilling, whose measured memory must stay inside the budget plus a margin <!-- const: the parameters of the tests --> |
 | Differential test | `tests/differential/` | everything else a query can do: seeded random tables and queries, run on quarry and DuckDB with random engine options, results compared |
 | Flaws matrix | `scripts/run-flaws.sh` | holes in the suite itself (below) |
 | Fuzzing | `fuzz/` | crashes, hangs and sanitizer reports on arbitrary bytes: `fuzz_parser` as SQL text, `fuzz_query` as a query over two fixed tables, run with random engine options |
@@ -60,9 +60,9 @@ and written with row groups of 50 so that pruning has something to prune), `gen_
 queries, and `run.py` runs each on quarry (the CLI with `--format json`) and on DuckDB over the same
 files. The options of each run are drawn per query: batch size 1, 7 or 2048; unlimited memory or
 64 KiB; one optimizer rule switched off, or none. `regression_seeds.txt` lists the seeds that once
-exposed a bug; they run first.
+exposed a bug; they run first. <!-- const: the generator's options -->
 
-The data has NULLs in every column (0 to 30%), keys from small domains so that joins find
+The data has NULLs in every column (0 to 30%) <!-- const: the generator's parameters -->, keys from small domains so that joins find
 duplicates, DECIMAL columns of several scales per table (so that joins and comparisons cross scales),
 and extremes: `INTEGER` and `BIGINT` limits, `DECIMAL(18)` and `DECIMAL(25)` near their widest
 values, a `DECIMAL(38, s)` column holding values near 10^37 (beyond 64 bits), the earliest and
@@ -110,7 +110,7 @@ survivors, and joins in its own order):
 - Both engines failing counts as agreement only when both raise an overflow-class error (quarry
   `decimal overflow` or `integer overflow`, DuckDB `Out of Range` or a failed cast); the run prints
   the pairs of messages. Any other pair of errors, or one engine failing alone, is a mismatch.
-- Under the 64 KiB limit exactly two refusals are by design and are matched by their messages: a
+- Under the 64 KiB limit <!-- const: the differential run's limit --> exactly two refusals are by design and are matched by their messages: a
   `Sort` whose input does not fit (a sort needs its whole input in memory), and a `HashJoin`
   partition that still does not fit at the deepest split. Such a query is run again without the
   limit and that run is compared; the summary tallies the re-runs by reason and asserts the set. Any
@@ -145,13 +145,21 @@ per flaw. A flaw that gets through means the suite cannot see that kind of bug.
   spilling is tested within a budget the process can afford, with the memory measured through the
   query's Arrow pool.
 - Concurrent queries: an `Engine` runs one query at a time and refuses a second by construction.
-- DuckDB's own errors: when the reference is wrong, both engines may be wrong together. The golden
-  results were spot-checked against hand-computed values to lessen this.
+- DuckDB's own errors: when the reference is wrong, both engines may be wrong together. One result,
+  a join with a filter and an aggregate, is worked out by hand from its rows and asserted in
+  `EngineTest.ResultsWorkedOutByHandAgree` (`tests/unit/engine/engine_test.cc`); the golden results
+  are DuckDB's own.
+- The cold Arrow cache of the `clean-clone` job: the job restores the Arrow build from the cache like
+  the others, so on a cache hit the README's first command (`scripts/build_arrow.sh`, which is not
+  marked to run) does not run. A fresh checkout is tested; a build of Arrow from nothing is tested only
+  when the cache misses, and by `scripts/preflight.sh` on a developer's machine.
 - Where quarry and DuckDB are known to differ and the comparator allows it: the name of the
   `SUM` type of integers, `DATE + INTERVAL` (DuckDB returns a `TIMESTAMP`), and the text of error
   messages.
 - Overflow that depends on the order in which an engine evaluates the rows of a filter or a join,
   for the reason given above: the generator keeps such overflow out of the comparison instead of
   deciding which engine is right.
-- Cancellation inside one `Next` call (a long loop that never returns to the batch boundary) and
-  the Arrow pool used by the spill reader are known gaps, listed with the other deferred findings.
+- Cancellation inside one Parquet row group read or inside the single copy that joins a join's,
+  sort's or top-N's input: the scan checks between row groups and batches, and the loops that build,
+  split and merge check as they go, but one call into the Parquet reader or one concatenation is not
+  interrupted ([operations](operations.md#how-promptly-a-timeout-or-ctrl-c-ends-a-query)).

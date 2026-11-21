@@ -58,10 +58,8 @@ What it costs:
 - **No parallelism for free.** A push pipeline is a natural unit to run on several threads; a pull
   tree is one thread. quarry v0.1 is single-threaded by decision, so this is not paid yet.
 
-How large the cost is expected to be: one `Next()` costs a few dozen nanoseconds (a virtual call, a
-`Result` move, a clock read for the profile, an atomic load for the cancel flag), and at 2,048 rows
-per batch that is a small fraction of a nanosecond per row, against the tens of nanoseconds per row
-that an expression kernel or a hash probe takes. The expectation is below 1% of the run time of the
-TPC-H queries at batch size 2,048, and visible only when the batch size shrinks (at one row per
-batch the call overhead is the query). The measured number goes in here when the benchmark task
-has run the batch-size ablation.
+How large the cost is: each `Next()` is a virtual call, a `Result` move, a clock read for the profile
+and an atomic load for the cancel flag, paid once per batch, so it is paid per row only when the
+batch size shrinks (at one row per batch the call overhead is the query). This record states no
+figure for it. The batch-size ablation in [docs/benchmarks.md](../benchmarks.md#ablation-batch-size)
+times every query at several batch sizes, and that table is the measurement.

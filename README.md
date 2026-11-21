@@ -1,7 +1,7 @@
 # quarry
 
 A vectorized SQL query engine in C++20 over Apache Arrow and Parquet, checked against DuckDB on
-every query it runs.
+every query in its test suite.
 
 quarry reads Parquet files, plans a `SELECT` statement with a small rule-based and cost-based
 optimizer, and runs it on Arrow column batches with its own kernels, hash joins and hash
@@ -33,31 +33,50 @@ Not that it runs: that it is checked, and that its slowness is explained.
    a collision, a spill that loses its last batch, ...) is compiled in and must make the tests fail;
    a CI job per defect asserts it ([scripts/run-flaws.sh](scripts/run-flaws.sh), the table in
    [docs/testing.md](docs/testing.md#the-flaws-matrix)).
-3. **Memory has a limit.** With `--memory-limit`, hash joins and hash aggregations that do not fit
-   spill to disk and return the same answer; a sort that does not fit stops with an error that says
-   what it needed. The TPC-H queries are run again under a limit far below their needs and the
-   memory the operators allocate is measured against the limit plus a margin
-   ([tests/tpch/tpch_budget_test.cc](tests/tpch/tpch_budget_test.cc),
-   [tests/unit/exec/spill_test.cc](tests/unit/exec/spill_test.cc),
-   [ADR 0006](docs/design/0006-memory-and-spill.md)).
+3. **Memory has a limit, and what it covers is measured.** With `--memory-limit`, hash joins and hash
+   aggregations that do not fit spill to disk and return the same answer; a sort that does not fit
+   stops with an error that says what it needed. The hash tables' storage (key index, key arena,
+   aggregate states, join chains) is allocated from the query's memory pool, and a table pays for a
+   growth before it allocates it. The pool the operators allocate from is measured against the limit
+   plus a margin of 256 KiB <!-- const: the margin the tests assert -->: for the TPC-H queries under a tiny limit
+   ([tests/tpch/tpch_budget_test.cc](tests/tpch/tpch_budget_test.cc)) and for an aggregate with
+   600,000 groups and joins at several limits
+   ([tests/unit/exec/near_limit_test.cc](tests/unit/exec/near_limit_test.cc), with its measured peaks in
+   [ADR 0006](docs/design/0006-memory-and-spill.md#the-margin-and-how-it-is-measured)). The limit does not
+   bound one Parquet row group per scan, and a join or sort holds its input twice while it
+   concatenates it, so the process can use about twice the limit
+   ([operations](docs/operations.md#picking-a-memory-limit)).
+   Spilling itself is tested in [tests/unit/exec/spill_test.cc](tests/unit/exec/spill_test.cc).
 4. **Where the time goes is measured, not guessed.** `--explain-analyze` prints the rows, batches, own
    time and peak state of every operator, a sampling profile is attributed to the operators, and
    [docs/where-time-goes.md](docs/where-time-goes.md) ties each gap to DuckDB to a number. The tables
    are rendered from the committed result files ([bench/render_tables.py](bench/render_tables.py),
    tested by [bench/test_render_tables.py](bench/test_render_tables.py)) and the check that they
    match runs in CI ([scripts/check-readme-numbers.sh](scripts/check-readme-numbers.sh)).
-5. **Every optimizer rule has an ablation.** Batch size, column pruning, row-group pruning and join
-   ordering are each switched off and timed ([ablation tables](docs/benchmarks.md#ablation-batch-size)),
-   and each rule is switchable on the command line (`--disable-rule`) because a test needs to run the
-   plan without it ([tests/unit/planner/rules_test.cc](tests/unit/planner/rules_test.cc),
-   [tests/planner/plan_golden_test.cc](tests/planner/plan_golden_test.cc)).
+5. **The ablation covers batch size and three of the six rules.** The ablation times batch size and
+   switches off `prune_row_groups`, `prune_columns` and `order_joins`, one at a time, as the
+   specification asked ([batch size](docs/benchmarks.md#ablation-batch-size),
+   [row-group pruning](docs/benchmarks.md#ablation-row-group-pruning),
+   [rules](docs/benchmarks.md#ablation-optimizer-rules)). `fold_constants`, `push_filters` and
+   `pick_build_side` are switchable too (`--disable-rule`) but their cost was never timed. That every
+   rule can be switched off and the four queries still return DuckDB's answers is tested in
+   [tests/tpch/tpch_test.cc](tests/tpch/tpch_test.cc); that a switch changes the plan, in
+   [tests/unit/planner/rules_test.cc](tests/unit/planner/rules_test.cc) and
+   [tests/planner/plan_golden_test.cc](tests/planner/plan_golden_test.cc).
 
 ## Try it
 
 You need a C++20 compiler (GCC 14, Clang 18 or Apple Clang), CMake 3.25 and Ninja.
 
 Arrow and Parquet are built once, from the pinned source release and verified against its checksum,
-into `~/.local/opt`; the build takes a while:
+into `~/.local/opt`; the build takes a while. The compiler that builds Arrow is the one that must
+build quarry, and the default one may be too old: on Ubuntu 24.04 `c++` is GCC 13, which quarry
+refuses after the long Arrow build. Choose the compiler first (the scripts and CMake read `CC` and
+`CXX`):
+
+```sh
+export CC=gcc-14 CXX=g++-14   # or: export CC=clang-18 CXX=clang++-18
+```
 
 ```sh
 scripts/build_arrow.sh
@@ -72,7 +91,7 @@ cmake --build --preset release
 ```
 
 The repository holds TPC-H data at scale factor 0.01 in `tests/data/tpch-sf0.01`. Run Q1, then Q3 with
-what every operator did, then Q5 under a 64 KiB limit so that its joins spill:
+what every operator did, then Q5 under a 64 KiB limit <!-- const: a parameter of the command below --> so that its joins spill:
 
 <!-- run -->
 ```sh
@@ -86,7 +105,10 @@ build/release/tools/quarry query --data tests/data/tpch-sf0.01 -f tests/tpch/que
 (`--format`), or the plan (`--explain`), or the plan with what every operator did
 (`--explain-analyze`). `--memory-limit`, `--batch-size`, `--disable-rule` and `--timeout` set the
 engine's options; `quarry query --help` lists them all. The library is one class,
-`quarry::Engine` ([include/quarry/engine.h](include/quarry/engine.h)).
+`quarry::Engine` ([include/quarry/engine.h](include/quarry/engine.h)). Version 0.1.0 has no install
+step, no exported CMake package and no `examples/` directory (the specification planned one): to use
+the library, add this repository with `add_subdirectory` and link the `quarry_engine` target, as
+`tools/` does.
 
 Check the engine against DuckDB yourself. This runs a short range of random seeds on quarry and on
 the DuckDB that `uv.lock` pins, and needs [uv](https://docs.astral.sh/uv/):
@@ -137,7 +159,7 @@ accepted SQL is in [docs/sql.md](docs/sql.md), and how to choose a memory limit 
 ## Correctness
 
 - **Answers.** The four queries at scale factor 0.01 equal DuckDB's, with decimals digit for digit
-  ([tests/tpch](tests/tpch)); the same queries under a 64 KiB limit, spilling, equal them too.
+  ([tests/tpch](tests/tpch)); the same queries under a 64 KiB limit <!-- const: the budget test's limit -->, spilling, equal them too.
 - **Plans.** The plan chosen for each query is a golden file, so an optimizer change that alters a plan
   nobody meant to alter fails a test ([tests/planner/plans](tests/planner/plans)).
 - **Random queries.** The [differential test](docs/testing.md#the-differential-test) runs seeded random
@@ -205,7 +227,7 @@ The last row is a loss for the optimizer: with `order_joins` off, Q5 is faster. 
 And the cost of staying inside a memory limit, with the queries whose joins and aggregations spill:
 
 <!-- bench:spill -->
-| Query | Memory limit | Time (ms) | Spilled (MiB) | Operator state peak (MiB) | Peak RSS (MiB) |
+| Query | Memory limit | Time (ms) | Spilled (MiB) | Operator pool peak (MiB) | Peak RSS (MiB) |
 |---|---|---|---|---|---|
 | Q3 | unlimited | 323.2 (322.5-334.0) | 0 | 13 | 65 |
 | Q3 | 256MB | 334.3 (332.7-339.3) | 0 | 13 | 66 |
@@ -220,7 +242,7 @@ And the cost of staying inside a memory limit, with the queries whose joins and 
 | High-cardinality aggregate | 64MB | 758.8 (754.7-783.0) | 36 | 0 | 165 |
 | High-cardinality aggregate | 16MB | 725.6 (714.1-751.8) | 36 | 0 | 84 |
 
-The limit bounds operator state only, not the Parquet reader's row-group buffers, so peak RSS stays above it. Batches read back from spill files use Arrow's default pool and are outside the operator-state peak (docs/design/0006-memory-and-spill.md). A refused cell is the result of that cell.
+The limit bounds operator state, not the Parquet reader's row-group buffers, so peak RSS stays above it. The operator pool peak is what the query's operators allocated through Arrow's memory pool: the hash tables' storage (key index, key arena, aggregate states, join chains), sort and build-row buffers, spill buffers, batches read back from spill files and expression temporaries. It excludes the Parquet reader's row-group buffers (their own pool), the result table, and the strings that MIN and MAX of a VARCHAR hold (docs/design/0006-memory-and-spill.md). A join's build rows are counted once in the pool, although they exist twice while they are concatenated. A refused cell is the result of that cell.
 
 Source: `bench/results/spill-20261121T135405Z.json` (commit `479f7227df54`, 2026-11-21T13:54:05Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
 The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
@@ -236,7 +258,7 @@ spends its time on, not to what DuckDB does differently.
   <!-- n:main.q1.duckdb -->143.0<!-- /n --> ms DuckDB needs for the whole query. There are few groups, so the time is per-row work:
   copying rows, updating sums, checked decimal arithmetic and hashing an encoded key for every row.
 - **Q6** (ratio <!-- n:main.q6.ratio -->6.10<!-- /n -->): <!-- n:cls.q6.filter -->78<!-- /n -->% of the samples are the filter pushed into the scan. The query keeps
-  <!-- n:ea.q6.2.rows -->114,160<!-- /n --> of <!-- n:ea.q5.7.rows -->6,001,215<!-- /n --> rows, so almost all the work is evaluating the predicate for rows that are then
+  <!-- n:ea.q6.2.rows -->114,160<!-- /n --> of <!-- n:data.lineitem_rows -->6,001,215<!-- /n --> rows, so almost all the work is evaluating the predicate for rows that are then
   dropped.
 - **Q3** (ratio <!-- n:main.q3.ratio -->3.59<!-- /n -->, the smallest gap): Parquet decode, the hash probe and the pushed-down filters share
   the time, and no single function dominates.
@@ -261,13 +283,15 @@ suites were re-run after the fix.
 - Data larger than scale factor 1, and the behaviour of a real machine that runs out of memory.
   Spilling is tested within a budget the process can afford.
 - Concurrent queries: an `Engine` runs one query at a time and refuses a second by construction.
-- DuckDB's own errors: where the reference is wrong, both engines may be wrong together. The golden
-  results were spot-checked against hand-computed values to lessen this.
+- DuckDB's own errors: where the reference is wrong, both engines may be wrong together. One result
+  is worked out by hand and asserted in `EngineTest.ResultsWorkedOutByHandAgree`; the golden results
+  are DuckDB's own.
 - Where quarry and DuckDB are known to differ and the comparator allows it: the type name of `SUM`
   over integers, `DATE + INTERVAL`, and the text of error messages.
 - Overflow that depends on the order in which an engine evaluates the rows of a filter or a join:
   the generator keeps it out of the comparison instead of deciding which engine is right.
-- Cancellation inside one `Next` call that never returns to a batch boundary.
+- Cancellation inside one Parquet row group read or one concatenation copy (the scan checks between
+  row groups and batches).
 
 The full list, with the reasons, is in [docs/testing.md](docs/testing.md#what-the-suite-does-not-cover).
 What the engine does not do (outer joins, subqueries, `DISTINCT`, `LIKE`, `CASE`, division, threads,

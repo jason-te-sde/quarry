@@ -43,10 +43,12 @@ struct OperatorProfile {
 struct QueryResult {
   std::shared_ptr<arrow::Table> table;
   std::vector<OperatorProfile> profile;  // one entry per operator, by id
-  // The most memory the query's operators held through Arrow's memory pool at once: build rows,
-  // sort and aggregate buffers, spill buffers and concatenation copies, whether or not the memory
-  // budget charged them. The result table is copied out of the pool as it is produced, so it is not
-  // counted. Scans allocate from a pool of their own, reported next to it.
+  // The most memory the query's operators held through Arrow's memory pool at once: the hash
+  // tables' storage (key index, key arena, aggregate states, join chains), build rows, sort
+  // buffers, spill buffers and concatenation copies, whether or not the memory budget charged them.
+  // The strings that MIN and MAX of a VARCHAR keep are not in it. The result table is copied out of
+  // the pool as it is produced, so it is not counted. Scans allocate from a pool of their own,
+  // reported next to it; a join's build rows are first in that pool and then copied into this one.
   int64_t pool_peak_bytes = 0;
   int64_t scan_pool_peak_bytes = 0;
 };

@@ -14,14 +14,20 @@ generated, not typed. The reasons behind each rule are in
 | `BIGINT` | `int64` | the same |
 | `DECIMAL(p, s)` | `decimal64(p, s)` for p <= 18, `decimal128(p, s)` for p <= 38 | stored as the integer value * 10^s; overflow is an error |
 | `DOUBLE` | `float64` | IEEE 754; no NaN or infinity is produced by quarry's own literals |
-| `DATE` | `date32` | days since 1970-01-01, years 0001 to 9999 |
+| `DATE` | `date32` | days since 1970-01-01, years 0001 to 9999; adding or subtracting a number of days is not range-checked, so a result outside those years is not detected |
 | `VARCHAR` | `utf8` | compared byte by byte |
 
 A Parquet `DECIMAL` column is read as `decimal128` whatever its precision; quarry accepts it as
 `DECIMAL(p, s)` and narrows it to 64 bits when p <= 18. Columns of any other Parquet type (FLOAT,
-UINT64, TIMESTAMP, LIST, DECIMAL with p > 38) are not supported.
+UINT64, TIMESTAMP, LIST, DECIMAL with p > 38) are not supported. A file written by Polars, or by pandas
+with pyarrow's string types, can record `large_string` or `string_view` in the Arrow schema it stores in
+its metadata; quarry reads that schema, reports such a column as unsupported and leaves the file's other
+columns usable.
 
 There is no `/` operator in v0.1: `AVG` is an aggregate, not a division.
+
+A `DATE` is not compared with a string: `WHERE l_shipdate >= '1994-01-01'` is the binder error
+`cannot compare DATE with VARCHAR`. Write `DATE '1994-01-01'`.
 
 ## Type rules
 
@@ -147,8 +153,10 @@ bound, with a message that names it, and never by returning a different answer. 
   (`lineitem.x, orders.x`). A table alias hides the table's own name.
 - A select alias can be used in `ORDER BY` but not in `WHERE`, `GROUP BY` or `HAVING`. An ordinal
   (`ORDER BY 1`, `GROUP BY 1`) is a binder error.
-- `ORDER BY` takes an alias, a select expression or any other expression; `NULLS FIRST` and `NULLS
-  LAST` are recorded on every sort key, and the default is `NULLS LAST` for both directions.
+- `ORDER BY` takes an alias on its own, a select expression or any other expression over the table's
+  columns; an alias inside an expression (`ORDER BY alias + 1`) is a binder error (`unknown column`),
+  so write the select expression itself. `NULLS FIRST` and `NULLS LAST` are recorded on every sort
+  key, and the default is `NULLS LAST` for both directions.
 - In a query with aggregates or `GROUP BY`, a column outside an aggregate must be a `GROUP BY`
   expression (compared as a bound expression, so `GROUP BY a + 1` allows `SELECT a + 1`).
 - `DATE '...' +/- INTERVAL 'n' DAY|MONTH|YEAR` is folded by the binder when the date is a literal;

@@ -47,6 +47,7 @@ Installed libraries (`<prefix>/quarry-arrow-build.txt` lists them for each build
 
 Measured on an Apple M2 with Apple clang 21 and 4 parallel jobs: the build took 113 s and the
 install prefix is 37 MB (`du -sh`). The build and source directories are deleted afterwards.
+<!-- obs: one build, timed by hand, size read with `du -sh`; not a benchmark and no results file holds it -->
 
 ### Components Parquet forces on
 

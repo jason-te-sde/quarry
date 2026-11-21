@@ -23,7 +23,9 @@ Please include:
 - what you found and what it lets an attacker do;
 - the version or commit, the compiler and the operating system;
 - the smallest input that shows it: the SQL text, and the Parquet file or a description of its shape. A
-  fuzzer's crash file is ideal: `fuzz/` reproduces it when the file is the only argument.
+  fuzzer's crash file is ideal: the targets `fuzz_parser` and `fuzz_query` that the `fuzz` preset builds
+  (`build/fuzz/fuzz/fuzz_parser`, `build/fuzz/fuzz/fuzz_query`) reproduce it when the file is their only
+  argument.
 
 I aim to acknowledge a report within a week, to say whether I accept it as a vulnerability within two
 weeks, and to publish a fix and an advisory together. This is a one-person project, and those are goals,

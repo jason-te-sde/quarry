@@ -23,7 +23,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS = Path("bench/results")
-DOCS = ["README.md", "docs/benchmarks.md", "docs/where-time-goes.md"]
+def doc_files(root):
+    """Every document whose numbers are checked: the README and everything under docs/ (the design
+    records and the operations guide included)."""
+    found = [root / "README.md"] + sorted((root / "docs").glob("**/*.md"))
+    return [p.relative_to(root).as_posix() for p in found if p.exists()]
+
+
+# A number with a unit that reads as a measurement or a size. A paragraph that holds one must be
+# bound to a result (a `bench:` block or an `n:` marker), or carry `<!-- obs: where it came from -->`
+# (an observation that no committed result holds) or `<!-- const -->` (a value the code or the
+# protocol stipulates, not a measurement).
+MEASUREMENT = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?\s?(?:ms|MiB|GiB|GB|KiB|MB|x|%|seconds?|s)(?!\w)")
+LABEL = re.compile(r"<!--\s*(obs|const)\b")
 QUERY_LABEL = {"q1": "Q1", "q3": "Q3", "q5": "Q5", "q6": "Q6", "agg": "High-cardinality aggregate"}
 MAIN_QUERIES = ["q1", "q3", "q5", "q6"]
 NO_RESULT = "_No result is committed for this table yet._"
@@ -166,7 +178,7 @@ def render_memory(root):
             ]
         )
     header = [
-        "Query", "quarry peak RSS", "quarry operator state", "quarry scan buffers",
+        "Query", "quarry peak RSS", "quarry operator pool peak", "quarry scan pool peak",
         "DuckDB threads=1 peak RSS", "DuckDB default peak RSS", "Python + DuckDB idle RSS",
     ]
     return "\n".join(
@@ -174,8 +186,11 @@ def render_memory(root):
             table(header, rows),
             "",
             "MiB. The DuckDB peaks include the Python interpreter, `duckdb` and `pyarrow`; the idle column is "
-            "that process's RSS just before its first query and is not subtracted. quarry's operator state and "
-            "scan buffers are the per-query Arrow pool peaks that `--explain-analyze` prints.",
+            "that process's RSS just before its first query and is not subtracted. quarry's two pool peaks are the "
+            "per-query Arrow pool peaks that `--explain-analyze` prints. The operator pool holds the hash tables' "
+            "storage (key index, key arena, aggregate states, join chains), sort and build-row buffers, spill "
+            "buffers and expression temporaries; the scan pool holds the Parquet reader's row-group buffers. "
+            "Neither includes the result table.",
             "",
             f"Source: `{path}`.",
         ]
@@ -254,14 +269,19 @@ def render_spill(root):
                 rows.append(
                     [QUERY_LABEL[q], b, stat(c), mib(c["spilled_bytes"]), mib(c["pool_peak_bytes"]), mib(c["peak_rss_bytes"])]
                 )
-    header = ["Query", "Memory limit", "Time (ms)", "Spilled (MiB)", "Operator state peak (MiB)", "Peak RSS (MiB)"]
+    header = ["Query", "Memory limit", "Time (ms)", "Spilled (MiB)", "Operator pool peak (MiB)", "Peak RSS (MiB)"]
     return "\n".join(
         [
             table(header, rows),
             "",
-            "The limit bounds operator state only, not the Parquet reader's row-group buffers, so peak RSS "
-            "stays above it. Batches read back from spill files use Arrow's default pool and are outside the "
-            "operator-state peak (docs/design/0006-memory-and-spill.md). A refused cell is the result of that cell.",
+            "The limit bounds operator state, not the Parquet reader's row-group buffers, so peak RSS stays above "
+            "it. The operator pool peak is what the query's operators allocated through Arrow's memory pool: the "
+            "hash tables' storage (key index, key arena, aggregate states, join chains), sort and build-row "
+            "buffers, spill buffers, batches read back from spill files and expression temporaries. It excludes "
+            "the Parquet reader's row-group buffers (their own pool), the result table, and the strings that "
+            "MIN and MAX of a VARCHAR hold (docs/design/0006-memory-and-spill.md). A join's build rows are "
+            "counted once in the pool, although they exist twice while they are concatenated. A refused cell is "
+            "the result of that cell.",
             "",
             source_line(path, d),
             flagged(d, "spill"),
@@ -398,6 +418,9 @@ def build_facts(root):
     found = newest(root, "main")
     if found:
         add_main_facts(facts, "main.", found[1])
+        rows = found[1].get("data", {}).get("default", {}).get("lineitem_rows")
+        if rows is not None:
+            facts["data.lineitem_rows"] = comma(rows)
     found = newest(root, "main", BEFORE_RESULTS)
     if found:
         add_main_facts(facts, "before.main.", found[1])
@@ -495,6 +518,48 @@ def render_file(text, root, name):
     return FACT.sub(substitute, text)
 
 
+def unlabelled_numbers(text):
+    """(line number, line) of every line that has a measurement-like number and is in a paragraph with
+    no label, outside code fences, `bench:` blocks and the values of `n:` markers."""
+    found = []
+    paragraph = []
+    fenced = False
+    in_block = False
+
+    def flush():
+        if paragraph and not any(LABEL.search(line) for _, line in paragraph):
+            for number, line in paragraph:
+                plain = FACT.sub("N", line)
+                plain = re.sub(r"`[^`]*`", "", plain)
+                plain = re.sub(r"<!--.*?-->", "", plain)
+                if MEASUREMENT.search(plain):
+                    found.append((number, line.strip()))
+        paragraph.clear()
+
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.startswith("```"):
+            flush()
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if line.startswith("<!-- bench:"):
+            flush()
+            in_block = True
+            continue
+        if line.startswith("<!-- /bench:"):
+            in_block = False
+            continue
+        if in_block:
+            continue
+        if not line.strip():
+            flush()
+            continue
+        paragraph.append((number, line))
+    flush()
+    return found
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--check", action="store_true", help="change nothing; fail when a table differs")
@@ -503,16 +568,21 @@ def main(argv=None):
     root = args.repo_root.resolve()
 
     status = 0
-    for name in DOCS:
+    for name in doc_files(root):
         path = root / name
-        if not path.exists():
-            continue
         old = path.read_text(encoding="utf-8")
         try:
             new = render_file(old, root, name)
         except KeyError as error:
             print(f"render_tables: {error.args[0]}", file=sys.stderr)
             return 1
+        for number, line in unlabelled_numbers(new):
+            status = 1
+            print(
+                f"render_tables: {name}:{number}: a number with a unit that no result produces and no "
+                f"label explains: {line[:100]}",
+                file=sys.stderr,
+            )
         if new == old:
             continue
         if args.check:
@@ -526,7 +596,11 @@ def main(argv=None):
             path.write_text(new, encoding="utf-8")
             print(f"rendered {name}")
     if args.check and status:
-        print("render_tables: the tables differ from the committed results; run bench/render_tables.py", file=sys.stderr)
+        print(
+            "render_tables: a table differs from the committed results (run bench/render_tables.py) or a "
+            "number is unlabelled",
+            file=sys.stderr,
+        )
     return status
 
 

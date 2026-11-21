@@ -37,6 +37,12 @@ quarry evaluates expressions by vectorized interpretation, in the shape of `src/
 - a batch carries an optional selection vector, and the evaluator gathers the live rows of a column
   once, at the leaf, so no kernel knows about selection vectors and every intermediate has one slot
   per live row.
+- `AND` and `OR` evaluate both operands for every live row; they do not skip the right side where the
+  left decides the answer. The right side's errors are therefore raised even where SQL's three-valued
+  logic would not need its value: `FALSE AND l_orderkey * 9223372036854775807 > 0` is an integer
+  overflow error, as is the same test under a filter that would drop the row. DuckDB may evaluate in
+  a different order, which is why the differential test keeps overflow that depends on evaluation
+  order out of the comparison (docs/testing.md).
 
 The reasons, in order of weight:
 

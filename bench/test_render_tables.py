@@ -133,6 +133,35 @@ class RenderTablesTest(unittest.TestCase):
         self.readme.write_text("<!-- n:main.q9.ratio -->1<!-- /n -->\n")
         self.assertEqual(self.run_tables(), 1)
 
+    def test_the_docs_directory_is_checked_too(self):
+        (self.root / "docs" / "design").mkdir(parents=True)
+        doc = self.root / "docs" / "design" / "0001-x.md"
+        doc.write_text("<!-- n:main.q1.ratio -->0<!-- /n -->\n")
+        self.result("main-20260101T000000Z.json", main_result(25.0))
+        self.assertEqual(self.run_tables("--check"), 1)
+        self.assertEqual(self.run_tables(), 0)
+        self.assertIn("2.50", doc.read_text())
+
+    def test_a_measurement_in_prose_needs_a_result_or_a_label(self):
+        text = "It took 113 s to build.\n\nThe flush size is 4 KiB.\n\nAbout 68 GB <!-- obs: footprint -->\n"
+        self.assertEqual([n for n, _ in render_tables.unlabelled_numbers(text)], [1, 3])
+        labelled = "It took 113 s to build. <!-- obs: timed once by hand -->\nThe flush is 4 KiB.\n"
+        self.assertEqual(render_tables.unlabelled_numbers(labelled), [])
+
+    def test_numbers_in_code_fences_bound_blocks_and_markers_are_not_flagged(self):
+        text = (
+            "```sh\nquarry --memory-limit 64KiB 12 ms\n```\n\n"
+            "<!-- bench:main -->\n| Q1 | 12 ms |\n<!-- /bench:main -->\n\n"
+            "Q1 takes <!-- n:main.q1.quarry -->12<!-- /n --> ms, `64 KiB` in code.\n"
+        )
+        self.assertEqual(render_tables.unlabelled_numbers(text), [])
+
+    def test_check_fails_on_an_unlabelled_measurement_in_a_doc(self):
+        self.readme.write_text("It took 113 s to build.\n")
+        self.assertEqual(self.run_tables("--check"), 1)
+        self.readme.write_text("It took 113 s to build. <!-- obs: timed once by hand -->\n")
+        self.assertEqual(self.run_tables("--check"), 0)
+
     def test_an_unknown_table_is_an_error(self):
         self.readme.write_text("<!-- bench:nope -->\n<!-- /bench:nope -->\n")
         self.assertEqual(self.run_tables(), 1)

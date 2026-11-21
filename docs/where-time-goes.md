@@ -5,7 +5,7 @@ slower than single-threaded DuckDB. The protocol is in [benchmarks.md](benchmark
 here are from the files in `bench/results/`, rendered by `bench/render_tables.py`.
 
 Method: `quarry query --explain-analyze` gives each operator's own time; `sample <pid> 10` on macOS
-ran for 10 seconds while `quarry query --repeat N` looped one query, and
+ran for 10 seconds <!-- const: the procedure's parameters --> while `quarry query --repeat N` looped one query, and
 `bench/classify_samples.py` attributes every sample to the nearest operator frame on its call stack
 (a pull-based operator's frame contains its children's, so the nearest one did the work). The
 samples come from a profiling run, not from a measured run: they say where the time is, not how
@@ -72,7 +72,7 @@ re-run after it.
 
 Two cells that did not finish before now do, both at the fixed commit: Q5 at batch size 1 takes
 <!-- n:batch.1.q5 -->22,247<!-- /n --> ms and Q5 with `prune_columns` off takes <!-- n:rules.prune_columns.off.q5 -->1,704<!-- /n --> ms. The Q5 spill rows are no longer
-slow in the same way: at 64 MB Q5 takes <!-- n:spill.q5.64MB.ms -->596.0<!-- /n --> ms and does not spill; at 16 MB it takes
+slow in the same way: <!-- const: the spill suite's limits --> at 64 MB Q5 takes <!-- n:spill.q5.64MB.ms -->596.0<!-- /n --> ms and does not spill; at 16 MB it takes
 <!-- n:spill.q5.16MB.ms -->7,375<!-- /n --> ms and spills <!-- n:spill.q5.16MB.spilled -->122<!-- /n --> MiB (spill table in [benchmarks.md](benchmarks.md)).
 
 ### 2. Q1: aggregating every lineitem row costs more than DuckDB's whole query
@@ -93,7 +93,7 @@ for every row.
 `EvalLogical` (<!-- n:frame.q6.EvalLogical.filter -->26.8<!-- /n -->%), `CompareFixed` (<!-- n:frame.q6.CompareFixed.filter -->19.7<!-- /n -->%), the copies around them (`_platform_memmove`
 <!-- n:frame.q6._platform_memmove.filter -->14.2<!-- /n -->%, `memcpy` <!-- n:frame.q6.DYLD-STUB$$memcpy.filter -->5.6<!-- /n -->%) and `RepeatedArrayFactory::CreateBufferOf` (<!-- n:frame.q6.arrow::RepeatedArrayFactory::CreateBufferOf.filter -->3.6<!-- /n -->%), Arrow's
 array-from-scalar helper, which the comparisons call for their literal operands. The query keeps
-<!-- n:ea.q6.2.rows -->114,160<!-- /n --> of <!-- n:ea.q5.7.rows -->6,001,215<!-- /n --> rows, so almost all the work is evaluating the plan's filter
+<!-- n:ea.q6.2.rows -->114,160<!-- /n --> of <!-- n:data.lineitem_rows -->6,001,215<!-- /n --> rows, so almost all the work is evaluating the plan's filter
 (`bench/results/profile/explain-analyze-q6.txt`: four conjuncts, `BETWEEN` being one, joined by
 three `AND`s) over rows that are then dropped. Row-group pruning cannot help on the default file,
 because the dates are spread across every row group; on the `l_shipdate`-sorted file it can, and the

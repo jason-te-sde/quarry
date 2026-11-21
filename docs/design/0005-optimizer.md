@@ -95,9 +95,10 @@ gives for free.
 
 The PK-FK assumption fails when both columns are foreign keys to a third table. Q5's
 `c_nationkey = s_nationkey` is that: both columns hold the 25 nation keys, so every customer
-matches about a 25th of the suppliers. At SF1 the formula divided by 10,000 (the supplier table) and
-estimated 15,000 rows where the join produces 12,093,991, and the greedy order built an
-18-million-row hash table. A column cannot hold more distinct values than its range, and the range
+matches about a 25th of the suppliers. At SF1 the formula divided by
+<!-- n:ea.q5before.10.est -->10,000<!-- /n --> (the supplier table) and estimated <!-- n:ea.q5before.7.est -->15,000<!-- /n --> rows where the join produces
+<!-- n:ea.q5before.7.rows -->12,093,991<!-- /n -->, and the greedy order built a hash table of <!-- n:ea.q5before.5.rows -->18,435,748<!-- /n --> rows (the profile
+before the fix, `bench/results/profile/before-join-estimate-fix/explain-analyze-q5.txt`). A column cannot hold more distinct values than its range, and the range
 is in the footer, so `W` caps the divisor: for those two columns it is 25. For a real primary-key
 pair the range is at least the table size and the divisor is unchanged (`l_orderkey = o_orderkey`:
 1.5M orders over a 6M range, divisor 1.5M). The spec allows row counts and min/max, so this adds
@@ -113,7 +114,7 @@ no histogram and no sampling.
 - Correlated predicates: selectivities multiply as if independent.
 - A filter on the key column of the smaller table does not reduce the divisor, so the estimate
   after filtering one side can be off by the filter's selectivity either way.
-- The constants are guesses: a range predicate keeps 30% on a column where it keeps 1% or 99%. The
+- The constants are guesses: a range predicate keeps 30% <!-- const: the fixed selectivity in src/planner/cardinality.cc --> on a column where it keeps 1% or 99%. The
   ranking among tables still comes out right in TPC-H because the filtered tables are the small ones,
   but the estimates are not close; `est=` in EXPLAIN is a ranking tool, not a prediction.
 - Greedy is not optimal: it never reconsiders the first relation, and it ignores that a join may

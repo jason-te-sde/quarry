@@ -66,7 +66,14 @@ arrays of the same type). `CommonComparisonType`:
 - any number with `DOUBLE`: `DOUBLE`;
 - `DECIMAL` with `DECIMAL` or an integer: the larger scale and the larger count of integer digits,
   capped at 38 (so `1.50 = 1.5` and `DECIMAL(15,2) < INTEGER` are exact);
-- anything else (`VARCHAR` with a number, `DATE` with an integer, ...) is not comparable.
+- anything else (`VARCHAR` with a number, `DATE` with an integer, `DATE` with a string literal such as
+  `'1994-01-01'`, ...) is not comparable; the binder says `cannot compare DATE with VARCHAR`.
+
+The cap at 38 has a consequence: a `DECIMAL(38,0)` compared with a `DECIMAL(38,10)` has no common type
+that holds both without losing digits, so the common type is `DECIMAL(38,10)` and the integer side
+must be scaled by 10^10, which overflows 38 digits for a value of 28 digits or more. quarry reports
+`decimal overflow` for such a comparison even when the values themselves are legitimate. TPC-H's
+columns are far from this, and it is a limit of the 128-bit representation.
 
 The factory functions in `src/expr/bound_expr.h` insert the casts, so a tree they produce always
 satisfies what the kernels require, and a hand-built tree that does not is an `Invalid` status

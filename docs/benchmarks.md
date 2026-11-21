@@ -26,7 +26,7 @@ the memory, the macOS version, the compiler and its version, the compiler flags,
 version and Arrow build flags (read from `quarry-arrow-build.txt` in the Arrow install). quarry is
 a Release build, `-O3 -DNDEBUG`, without `-march=native`: the binary does not depend on the CPU it
 was built on. Arrow is a static Release build without the compute kernels, without jemalloc and
-without mimalloc (the system allocator).
+without mimalloc (the system allocator). <!-- const: the machine the suites were run on; every result file records it -->
 
 ## Data
 
@@ -64,21 +64,25 @@ reports the median, the minimum and the maximum of the five measured runs, in mi
 keeps all five. The warm-up is never part of a statistic.
 
 Each cell also reports peak resident set size (`getrusage` `ru_maxrss`) for the whole process.
-quarry also reports the operator-state peak and the scan-buffer peak from its own memory pools
+quarry also reports the operator-pool peak and the scan-pool peak from its own memory pools
 (`pool_peak_bytes` and `scan_pool_peak_bytes`, the same two numbers `--explain-analyze` prints).
 The DuckDB figure includes the Python interpreter, the `duckdb` and `pyarrow` modules and the
 connection, so each DuckDB worker also reports its RSS just before its first query, and the
 tables show that idle figure next to the peak instead of subtracting it.
 
 An execution that fails is the result of its cell, recorded with the error text. An execution that
-takes longer than 600 seconds is stopped and recorded as a timeout. Neither is retried or dropped.
+takes longer than 600 seconds is stopped and recorded as a timeout. Neither is retried or dropped. <!-- const: the harness limit in bench/run_bench.py -->
 
 The 600-second cap is checked by the engine between batches, so it does not fire in a process that is
 blocked in swap. A cell whose process is still running 1,200 seconds after it started is therefore
-killed by the harness and recorded as a timeout, with no statistics. This rule was added after the
-first ablation attempt, when quarry at batch size 1 on Q5 grew to a 68 GB footprint and ran for over
-an hour without reaching the cap. Results of the `main` suite (taken before the rule) are unaffected:
-none of their cells came near either limit.
+killed by the harness and recorded as a timeout, with no statistics. <!-- const: the limits of bench/run_bench.py -->
+
+This rule was added after the first ablation attempt, when quarry at batch size 1 on Q5 grew to a
+68 GB footprint and ran for over an hour without reaching the cap. The footprint was read with
+`footprint` while the process was running; that attempt was killed and left no result file, so no
+committed result holds the figure. <!-- obs: read by hand with `footprint` during the first, killed ablation attempt -->
+Results of the `main` suite (taken before the rule) are unaffected: none of their cells came near
+either limit.
 
 ## Correctness before timing
 
@@ -108,10 +112,10 @@ only checks that the harness works and publishes no numbers, records the load bu
   `SELECT l_orderkey, SUM(l_extendedprice) FROM lineitem GROUP BY l_orderkey` (about 1.5 million
   groups at SF1) at unlimited, 256 MB, 64 MB and 16 MB (`--memory-limit`, powers of 1000), with the
   time and the bytes spilled. Q1 and Q6 have a handful of groups and never spill under any budget,
-  so they are not in this table. The budget bounds operator state only. It does not bound the
+  so they are not in this table. The budget bounds operator state. It does not bound the
   Parquet reader's row-group buffers, so the table also reports peak RSS. Under a small budget a
   sort, or a deep join, may be refused with `resource exhausted: ...`; a refused cell shows the
-  refusal as its result and is not dropped or retried with a bigger budget.
+  refusal as its result and is not dropped or retried with a bigger budget. <!-- const: the suite's definition in bench/run_bench.py -->
 - `smoke`: the `main` suite on the SF0.01 test data, for CI.
 
 ## Addendum: the suites are re-run after the join-estimate fix
@@ -156,16 +160,18 @@ nothing.
 The call graphs under `bench/results/profile/` are taken as follows, on the SF1 default export,
 with nothing else running.
 
-1. The operator times: `build/release/tools/quarry query --data bench/data/sf1 -c "$(cat tests/tpch/queries/q5.sql)" --explain-analyze`,
-   saved as `bench/results/profile/explain-analyze-<name>.txt` (`--disable-rule order_joins` for the
-   `q5-without-order_joins` name).
+1. The operator times, for every `<name>` (`q1`, `q3`, `q5`, `q6`, and `q5-without-order_joins`, which is
+   Q5 with `--disable-rule order_joins` added):
+   `build/release/tools/quarry query --data bench/data/sf1 -f tests/tpch/queries/<query>.sql --explain-analyze`,
+   saved as `bench/results/profile/explain-analyze-<name>.txt`, where `<query>` is `<name>` up to the
+   first `-`.
 2. The samples, from the quarry process itself (the DuckDB worker is never sampled): start
    `build/release/tools/quarry query --data bench/data/sf1 -c "$(cat tests/tpch/queries/<name>.sql)" --repeat N --timing-json /dev/null`
    in the background, with N large enough that the loop is still running 10 seconds later (a query
    of 0.3 s needs N of at least 40, one of 4 s needs 5; the loop repeats the same query, so N does
    not change what is sampled). Wait until the warm-up has finished, then run
    `sample <pid> 10 1 -file callgraph-<name>.txt` (10 seconds, one sample per millisecond, all
-   threads). Stop the quarry process afterwards.
+   threads). Stop the quarry process afterwards. <!-- const: the procedure's parameters -->
 3. Keep the "Call graph:" section of the output, compress it as
    `bench/results/profile/callgraph-<name>.txt.gz`, and run `uv run bench/classify_samples.py`,
    which writes `classified.json`. Rendering the profile tables is `bench/render_tables.py`.
@@ -202,14 +208,14 @@ The 1-minute load average stayed at or below 1.5 before every run of every measu
 ### Memory
 
 <!-- bench:memory -->
-| Query | quarry peak RSS | quarry operator state | quarry scan buffers | DuckDB threads=1 peak RSS | DuckDB default peak RSS | Python + DuckDB idle RSS |
+| Query | quarry peak RSS | quarry operator pool peak | quarry scan pool peak | DuckDB threads=1 peak RSS | DuckDB default peak RSS | Python + DuckDB idle RSS |
 |---|---|---|---|---|---|---|
 | Q1 | 38 | 0 | 19 | 99 | 212 | 85 |
 | Q3 | 65 | 13 | 12 | 118 | 302 | 86 |
 | Q5 | 114 | 34 | 12 | 127 | 279 | 85 |
 | Q6 | 26 | 0 | 13 | 96 | 180 | 85 |
 
-MiB. The DuckDB peaks include the Python interpreter, `duckdb` and `pyarrow`; the idle column is that process's RSS just before its first query and is not subtracted. quarry's operator state and scan buffers are the per-query Arrow pool peaks that `--explain-analyze` prints.
+MiB. The DuckDB peaks include the Python interpreter, `duckdb` and `pyarrow`; the idle column is that process's RSS just before its first query and is not subtracted. quarry's two pool peaks are the per-query Arrow pool peaks that `--explain-analyze` prints. The operator pool holds the hash tables' storage (key index, key arena, aggregate states, join chains), sort and build-row buffers, spill buffers and expression temporaries; the scan pool holds the Parquet reader's row-group buffers. Neither includes the result table.
 
 Source: `bench/results/main-20261121T131055Z.json`.
 <!-- /bench:memory -->
@@ -261,7 +267,7 @@ The 1-minute load average stayed at or below 1.5 before every run of every measu
 ### Cost of spilling
 
 <!-- bench:spill -->
-| Query | Memory limit | Time (ms) | Spilled (MiB) | Operator state peak (MiB) | Peak RSS (MiB) |
+| Query | Memory limit | Time (ms) | Spilled (MiB) | Operator pool peak (MiB) | Peak RSS (MiB) |
 |---|---|---|---|---|---|
 | Q3 | unlimited | 323.2 (322.5-334.0) | 0 | 13 | 65 |
 | Q3 | 256MB | 334.3 (332.7-339.3) | 0 | 13 | 66 |
@@ -276,7 +282,7 @@ The 1-minute load average stayed at or below 1.5 before every run of every measu
 | High-cardinality aggregate | 64MB | 758.8 (754.7-783.0) | 36 | 0 | 165 |
 | High-cardinality aggregate | 16MB | 725.6 (714.1-751.8) | 36 | 0 | 84 |
 
-The limit bounds operator state only, not the Parquet reader's row-group buffers, so peak RSS stays above it. Batches read back from spill files use Arrow's default pool and are outside the operator-state peak (docs/design/0006-memory-and-spill.md). A refused cell is the result of that cell.
+The limit bounds operator state, not the Parquet reader's row-group buffers, so peak RSS stays above it. The operator pool peak is what the query's operators allocated through Arrow's memory pool: the hash tables' storage (key index, key arena, aggregate states, join chains), sort and build-row buffers, spill buffers, batches read back from spill files and expression temporaries. It excludes the Parquet reader's row-group buffers (their own pool), the result table, and the strings that MIN and MAX of a VARCHAR hold (docs/design/0006-memory-and-spill.md). A join's build rows are counted once in the pool, although they exist twice while they are concatenated. A refused cell is the result of that cell.
 
 Source: `bench/results/spill-20261121T135405Z.json` (commit `479f7227df54`, 2026-11-21T13:54:05Z); times are milliseconds, median (min-max) of 5 runs after 1 warm-up.
 The 1-minute load average stayed at or below 1.5 before every run of every measured cell.

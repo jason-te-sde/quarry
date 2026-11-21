@@ -65,11 +65,16 @@ tool: a reviewer holds you to them.
 - **Everything in the repository is English**: code, comments, documents, commit messages, test names.
   `scripts/check-hygiene.sh` checks that no tracked file and no commit message contains Chinese,
   Japanese or Korean characters, an authorship credit, or an absolute path of a home directory.
-- **Numbers in the README and the docs come from `bench/results/`.** A table is rendered by
-  `uv run bench/render_tables.py`, and a number in prose is written as
-  `<!-- n:NAME -->value<!-- /n -->` so that it is rendered too. `scripts/check-readme-numbers.sh` fails
-  when one disagrees. A result is produced by `bench/run_bench.py` on a quiet machine and by the protocol
-  in [docs/benchmarks.md](docs/benchmarks.md), which refuses a tree with uncommitted changes.
+- **A number with a unit in the README or under `docs/` is bound to a result, or labelled.** A table
+  is rendered from `bench/results/` by `uv run bench/render_tables.py`, and a number in prose is
+  written as `<!-- n:NAME -->value<!-- /n -->` so that it is rendered too.
+  `scripts/check-readme-numbers.sh` fails when one disagrees, and when a paragraph holds a number with a
+  unit (ms, MiB, KiB, GB, x, %, seconds) that is neither of those nor labelled. The labels are
+  `<!-- obs: where it came from -->` for an observation that no committed result holds (a figure read by
+  hand, with the tool or the test that gave it) and `<!-- const -->` for a value that the code or the
+  protocol stipulates and that is not a measurement. A label covers the paragraph or the table it is
+  in. A result is produced by `bench/run_bench.py` on a quiet machine and by the protocol in
+  [docs/benchmarks.md](docs/benchmarks.md), which refuses a tree with uncommitted changes.
 
 ## Tests come first
 
