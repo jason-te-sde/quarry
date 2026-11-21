@@ -45,7 +45,26 @@ import gen_query
 HERE = Path(__file__).resolve().parent
 REGRESSION_FILE = HERE / "regression_seeds.txt"
 QUERY_TIMEOUT_SECONDS = 120
-RESOURCE_EXHAUSTED = re.compile(r"resource exhausted|memory limit|out of memory|exceeds the memory", re.IGNORECASE)
+# The refusals under a memory limit that are by design, and nothing else: a sort needs its whole
+# input in memory, and a join partition that still does not fit after the deepest split (rows that
+# share too much of their key hash) is refused. Any other "resource exhausted" under the limit, such
+# as a hash aggregate that should have spilled, is a bug and a mismatch.
+REFUSAL_REASONS = {
+    "sort over budget": re.compile(r"resource exhausted: Sort #\d+ needs \d+ bytes, budget \d+, in use \d+$"),
+    "join partition at maximum depth": re.compile(
+        r"resource exhausted: HashJoin #\d+ needs \d+ bytes, budget \d+, in use \d+: "
+        r"a partition does not fit although the input was split by hash down to partition depth"
+    ),
+}
+
+
+def refusal_reason(message):
+    """The documented reason for a refusal under a memory limit, or None if it is not one."""
+    text = " ".join(message.split())
+    for reason, pattern in REFUSAL_REASONS.items():
+        if pattern.search(text):
+            return reason
+    return None
 
 
 def read_regression_seeds(path=REGRESSION_FILE):
@@ -69,7 +88,7 @@ class Stats:
         self.compared = 0
         self.nonempty = 0
         self.both_error = collections.Counter()
-        self.budget_refusals = collections.Counter()
+        self.budget_refusals = collections.Counter()  # reason -> re-runs
         self.skipped_big = 0
         self.failures = 0
 
@@ -81,8 +100,9 @@ class Stats:
             f"quarry refused for the memory limit, rerun without it: {sum(self.budget_refusals.values())}",
             f"skipped for size: {self.skipped_big}",
         ]
-        for message, count in self.budget_refusals.most_common():
-            lines.append(f"    {count}x refused: {message}")
+        for reason, count in self.budget_refusals.most_common():
+            lines.append(f"    {count}x re-run, reason: {reason}")
+        assert set(self.budget_refusals) <= set(REFUSAL_REASONS), "a re-run for an undocumented reason"
         for (quarry_message, duck_message), count in self.both_error.most_common():
             lines.append(f"    {count}x quarry: {quarry_message} | duckdb: {duck_message}")
         return "\n".join(lines)
@@ -142,8 +162,11 @@ def check_query(quarry, con, data_dir, query, stats, max_rows):
     if got_kind in ("crash", "timeout"):
         return [f"quarry {got_kind}: {got}"]
 
-    if got_kind == "error" and query.options.memory_limit and RESOURCE_EXHAUSTED.search(got):
-        stats.budget_refusals[short(got)[:110]] += 1
+    if got_kind == "error" and query.options.memory_limit and "resource exhausted" in got:
+        reason = refusal_reason(got)
+        if reason is None:
+            return [f"quarry refused under the memory limit for a reason that is not by design:\n    quarry: {short(got)}"]
+        stats.budget_refusals[reason] += 1
         index = args.index("--memory-limit")
         del args[index : index + 2]
         got_kind, got = run_quarry(quarry, data_dir, query.sql, args)

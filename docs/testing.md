@@ -82,9 +82,12 @@ survivors, and joins in its own order):
 - Both engines failing counts as agreement only when both raise an overflow-class error (quarry
   `decimal overflow` or `integer overflow`, DuckDB `Out of Range` or a failed cast); the run prints
   the pairs of messages. Any other pair of errors, or one engine failing alone, is a mismatch.
-- A query that quarry refuses with `resource exhausted` under the 64 KiB limit (a sort needs its
-  whole input in memory, by design) is run again without the limit and that run is compared. The
-  number of refusals is printed.
+- Under the 64 KiB limit exactly two refusals are by design and are matched by their messages: a
+  `Sort` whose input does not fit (a sort needs its whole input in memory), and a `HashJoin`
+  partition that still does not fit at the deepest split. Such a query is run again without the
+  limit and that run is compared; the summary tallies the re-runs by reason and asserts the set. Any
+  other `resource exhausted` under the limit (a hash aggregate that should have spilled, say) is a
+  mismatch.
 - A query whose `FROM` and `WHERE` return more than 400,000 rows is skipped.
 
 A mismatch prints the seed, the SQL, the engine options and a row diff, and the command that
