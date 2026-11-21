@@ -22,7 +22,8 @@ How the outcomes are judged:
     number of refusals is reported;
   * anything else (one engine fails, a different kind of error, a crash, a timeout) is a mismatch.
 
-A query whose FROM and WHERE alone return more than --max-rows rows is skipped, so that a skewed key
+A query whose FROM and WHERE alone return more than --max-rows rows is skipped (its FROM alone, when
+push_filters is switched off, since the filter then runs after the joins), so that a skewed key
 cannot turn one query into minutes of work; the number is reported.
 """
 
@@ -154,6 +155,14 @@ def check_query(quarry, con, data_dir, query, stats, max_rows):
     if kind == "ok" and count.rows[0][0] > max_rows:
         stats.skipped_big += 1
         return []
+    # With push_filters off the joins run before the WHERE: a filter that keeps no row can still sit
+    # on top of hundreds of millions of join rows (seed 4776, query 4: 236 million rows, which batch
+    # size 7 cannot get through in the timeout). Bound that work too.
+    if query.options.disabled_rule == "push_filters" and query.from_count_sql:
+        kind, unfiltered = run_duckdb(con, query.from_count_sql)
+        if kind == "ok" and unfiltered.rows[0][0] > max_rows:
+            stats.skipped_big += 1
+            return []
 
     args = query.options.cli_args()
     expected_kind, expected = run_duckdb(con, query.sql)
