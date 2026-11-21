@@ -24,7 +24,7 @@ jobs:
       CC: gcc-14
       CXX: g++-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The two cheap refusals come first, so that a mistyped tag fails in seconds and not after
       # the build: the tag must be v and the version of CMakeLists.txt, and the changelog must have
@@ -74,7 +74,7 @@ jobs:
       # The token that can write is not left in .git/config, and it is not in the environment of
       # the steps that run the scripts of the tagged commit either: only the step that creates the
       # release gets it, from GH_TOKEN. git archive reads only the local repository.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
