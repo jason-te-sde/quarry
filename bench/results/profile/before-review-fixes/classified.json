@@ -1,0 +1,367 @@
+{
+ "q1": {
+  "top_frames": [
+   {
+    "category": "aggregate",
+    "frame": "_platform_memmove",
+    "samples": 805,
+    "share": 0.1057
+   },
+   {
+    "category": "aggregate",
+    "frame": "quarry::Gather",
+    "samples": 796,
+    "share": 0.1045
+   },
+   {
+    "category": "aggregate",
+    "frame": "quarry::SumState::Update",
+    "samples": 583,
+    "share": 0.0765
+   },
+   {
+    "category": "Parquet decode",
+    "frame": "arrow::BaseBinaryBuilder::Append",
+    "samples": 365,
+    "share": 0.0479
+   },
+   {
+    "category": "Parquet decode",
+    "frame": "snappy::DecompressBranchless",
+    "samples": 339,
+    "share": 0.0445
+   },
+   {
+    "category": "aggregate",
+    "frame": "quarry::eval_internal::RunChecked",
+    "samples": 338,
+    "share": 0.0444
+   },
+   {
+    "category": "Parquet decode",
+    "frame": "parquet::ArrowBinaryHelper<parquet::PhysicalType<",
+    "samples": 277,
+    "share": 0.0364
+   },
+   {
+    "category": "aggregate",
+    "frame": "quarry::HashBytes",
+    "samples": 253,
+    "share": 0.0332
+   }
+  ],
+  "samples": {
+   "Parquet decode": 1707,
+   "filter": 649,
+   "scan other": 219,
+   "hash build": 0,
+   "probe": 0,
+   "aggregate": 4896,
+   "sort": 1,
+   "other": 147
+  },
+  "total": 7619,
+  "share": {
+   "Parquet decode": 0.224,
+   "filter": 0.0852,
+   "scan other": 0.0287,
+   "hash build": 0.0,
+   "probe": 0.0,
+   "aggregate": 0.6426,
+   "sort": 0.0001,
+   "other": 0.0193
+  }
+ },
+ "q3": {
+  "top_frames": [
+   {
+    "category": "Parquet decode",
+    "frame": "snappy::DecompressBranchless",
+    "samples": 1330,
+    "share": 0.1744
+   },
+   {
+    "category": "probe",
+    "frame": "quarry::KeyIndex::Find",
+    "samples": 926,
+    "share": 0.1214
+   },
+   {
+    "category": "filter",
+    "frame": "quarry::EvaluatePredicate",
+    "samples": 475,
+    "share": 0.0623
+   },
+   {
+    "category": "filter",
+    "frame": "_platform_memmove",
+    "samples": 363,
+    "share": 0.0476
+   },
+   {
+    "category": "probe",
+    "frame": "quarry::HashBytes",
+    "samples": 361,
+    "share": 0.0473
+   },
+   {
+    "category": "probe",
+    "frame": "quarry::Gather",
+    "samples": 342,
+    "share": 0.0449
+   },
+   {
+    "category": "filter",
+    "frame": "quarry::eval_internal::CompareFixed",
+    "samples": 314,
+    "share": 0.0412
+   },
+   {
+    "category": "scan other",
+    "frame": "quarry::eval_internal::NarrowDecimal128",
+    "samples": 240,
+    "share": 0.0315
+   }
+  ],
+  "samples": {
+   "Parquet decode": 1837,
+   "filter": 1576,
+   "scan other": 262,
+   "hash build": 552,
+   "probe": 2772,
+   "aggregate": 476,
+   "sort": 4,
+   "other": 146
+  },
+  "total": 7625,
+  "share": {
+   "Parquet decode": 0.2409,
+   "filter": 0.2067,
+   "scan other": 0.0344,
+   "hash build": 0.0724,
+   "probe": 0.3635,
+   "aggregate": 0.0624,
+   "sort": 0.0005,
+   "other": 0.0191
+  }
+ },
+ "q5-without-order_joins": {
+  "top_frames": [
+   {
+    "category": "probe",
+    "frame": "quarry::KeyIndex::Find",
+    "samples": 1548,
+    "share": 0.2023
+   },
+   {
+    "category": "Parquet decode",
+    "frame": "snappy::DecompressBranchless",
+    "samples": 966,
+    "share": 0.1263
+   },
+   {
+    "category": "probe",
+    "frame": "quarry::HashBytes",
+    "samples": 584,
+    "share": 0.0763
+   },
+   {
+    "category": "probe",
+    "frame": "_platform_memmove",
+    "samples": 357,
+    "share": 0.0467
+   },
+   {
+    "category": "probe",
+    "frame": "quarry::Gather",
+    "samples": 356,
+    "share": 0.0465
+   },
+   {
+    "category": "probe",
+    "frame": "quarry::HashJoinOperator::Next",
+    "samples": 289,
+    "share": 0.0378
+   },
+   {
+    "category": "probe",
+    "frame": "quarry::EncodeKeys",
+    "samples": 219,
+    "share": 0.0286
+   },
+   {
+    "category": "scan other",
+    "frame": "quarry::eval_internal::NarrowDecimal128",
+    "samples": 156,
+    "share": 0.0204
+   }
+  ],
+  "samples": {
+   "Parquet decode": 1355,
+   "filter": 540,
+   "scan other": 180,
+   "hash build": 526,
+   "probe": 4607,
+   "aggregate": 284,
+   "sort": 2,
+   "other": 157
+  },
+  "total": 7651,
+  "share": {
+   "Parquet decode": 0.1771,
+   "filter": 0.0706,
+   "scan other": 0.0235,
+   "hash build": 0.0687,
+   "probe": 0.6021,
+   "aggregate": 0.0371,
+   "sort": 0.0003,
+   "other": 0.0205
+  }
+ },
+ "q5": {
+  "top_frames": [
+   {
+    "category": "probe",
+    "frame": "quarry::KeyIndex::Find",
+    "samples": 2146,
+    "share": 0.2815
+   },
+   {
+    "category": "Parquet decode",
+    "frame": "snappy::DecompressBranchless",
+    "samples": 731,
+    "share": 0.0959
+   },
+   {
+    "category": "probe",
+    "frame": "_platform_memmove",
+    "samples": 367,
+    "share": 0.0481
+   },
+   {
+    "category": "probe",
+    "frame": "quarry::HashBytes",
+    "samples": 363,
+    "share": 0.0476
+   },
+   {
+    "category": "probe",
+    "frame": "quarry::Gather",
+    "samples": 257,
+    "share": 0.0337
+   },
+   {
+    "category": "hash build",
+    "frame": "_xzm_xzone_malloc_tiny",
+    "samples": 199,
+    "share": 0.0261
+   },
+   {
+    "category": "hash build",
+    "frame": "quarry::KeyIndex::Find",
+    "samples": 194,
+    "share": 0.0254
+   },
+   {
+    "category": "hash build",
+    "frame": "_xzm_free",
+    "samples": 191,
+    "share": 0.0251
+   }
+  ],
+  "samples": {
+   "Parquet decode": 1019,
+   "filter": 403,
+   "scan other": 166,
+   "hash build": 1736,
+   "probe": 4112,
+   "aggregate": 10,
+   "sort": 0,
+   "other": 177
+  },
+  "total": 7623,
+  "share": {
+   "Parquet decode": 0.1337,
+   "filter": 0.0529,
+   "scan other": 0.0218,
+   "hash build": 0.2277,
+   "probe": 0.5394,
+   "aggregate": 0.0013,
+   "sort": 0.0,
+   "other": 0.0232
+  }
+ },
+ "q6": {
+  "top_frames": [
+   {
+    "category": "filter",
+    "frame": "quarry::eval_internal::EvalLogical",
+    "samples": 2032,
+    "share": 0.2677
+   },
+   {
+    "category": "filter",
+    "frame": "quarry::eval_internal::CompareFixed",
+    "samples": 1496,
+    "share": 0.197
+   },
+   {
+    "category": "filter",
+    "frame": "_platform_memmove",
+    "samples": 1080,
+    "share": 0.1423
+   },
+   {
+    "category": "Parquet decode",
+    "frame": "snappy::DecompressBranchless",
+    "samples": 626,
+    "share": 0.0825
+   },
+   {
+    "category": "filter",
+    "frame": "DYLD-STUB$$memcpy",
+    "samples": 425,
+    "share": 0.056
+   },
+   {
+    "category": "scan other",
+    "frame": "quarry::eval_internal::NarrowDecimal128",
+    "samples": 276,
+    "share": 0.0364
+   },
+   {
+    "category": "filter",
+    "frame": "arrow::RepeatedArrayFactory::CreateBufferOf",
+    "samples": 271,
+    "share": 0.0357
+   },
+   {
+    "category": "Parquet decode",
+    "frame": "arrow::util::internal::RunGetSpaced",
+    "samples": 137,
+    "share": 0.018
+   }
+  ],
+  "samples": {
+   "Parquet decode": 1128,
+   "filter": 5897,
+   "scan other": 294,
+   "hash build": 0,
+   "probe": 0,
+   "aggregate": 193,
+   "sort": 0,
+   "other": 80
+  },
+  "total": 7592,
+  "share": {
+   "Parquet decode": 0.1486,
+   "filter": 0.7767,
+   "scan other": 0.0387,
+   "hash build": 0.0,
+   "probe": 0.0,
+   "aggregate": 0.0254,
+   "sort": 0.0,
+   "other": 0.0105
+  }
+ }
+}

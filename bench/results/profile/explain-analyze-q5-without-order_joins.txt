@@ -1,15 +1,15 @@
-Sort #0 [#1 DESC NULLS LAST] est=540 rows=5 batches=1 time=0.014ms peak=151B
+Sort #0 [#1 DESC NULLS LAST] est=540 rows=5 batches=1 time=0.020ms peak=151B
   Project #1 [#0 AS n_name, #1 AS revenue] est=540 rows=5 batches=1 time=0.002ms peak=0B
-    HashAggregate #2 [groups=[#12]; aggs=[SUM((#2 * (1.00 - CAST(#3 AS DECIMAL(16,2))))) -> DECIMAL(38,4)]] est=540 rows=5 batches=1 time=16.526ms peak=552B
-      HashJoin #3 [probe_keys=#13; build_keys=#0] est=5401 rows=7243 batches=2653 time=16.117ms peak=301B
-        HashJoin #4 [probe_keys=#10; build_keys=#0] est=54011 rows=36236 batches=2933 time=15.062ms peak=2.2KiB
-          HashJoin #5 [probe_keys=#1, #5; build_keys=#0, #1] est=54011 rows=36236 batches=2933 time=43.060ms peak=1.1MiB
-            HashJoin #6 [probe_keys=#0; build_keys=#2] est=540109 rows=910519 batches=2933 time=198.022ms peak=22.2MiB
-              Scan #7 [lineitem; cols=l_orderkey,l_suppkey,l_extendedprice,l_discount] est=6001215 rows=6001215 batches=2933 time=80.426ms peak=0B buffer=5.6MiB
-              HashJoin #8 [probe_keys=#0; build_keys=#1] est=135000 rows=227597 batches=147 time=26.287ms peak=12.5MiB
-                Scan #9 [customer; cols=c_custkey,c_nationkey] est=150000 rows=150000 batches=74 time=1.070ms peak=0B buffer=1.4MiB
-                Scan #10 [orders; cols=o_orderkey,o_custkey,o_orderdate; filter=((#2 >= DATE '1994-01-01') AND (#2 < DATE '1995-01-01')); prune=(#2 >= DATE '1994-01-01') AND (#2 < DATE '1995-01-01')] est=135000 rows=227597 batches=735 time=49.911ms peak=0B buffer=2.4MiB
-            Scan #11 [supplier; cols=s_suppkey,s_nationkey] est=10000 rows=10000 batches=5 time=0.398ms peak=0B buffer=117.2KiB
-          Scan #12 [nation; cols=n_nationkey,n_name,n_regionkey] est=25 rows=25 batches=1 time=0.105ms peak=0B buffer=481B
-        Scan #13 [region; cols=r_regionkey,r_name; filter=(#1 = 'ASIA'); prune=(#1 = 'ASIA')] est=1 rows=1 batches=1 time=0.240ms peak=0B buffer=78B
-pool_peak=14.0MiB scan_pool_peak=12.2MiB
+    HashAggregate #2 [groups=[#12]; aggs=[SUM((#2 * (1.00 - CAST(#3 AS DECIMAL(16,2))))) -> DECIMAL(38,4)]] est=540 rows=5 batches=1 time=16.674ms peak=668B
+      HashJoin #3 [probe_keys=#13; build_keys=#0] est=5401 rows=7243 batches=2653 time=16.144ms peak=301B
+        HashJoin #4 [probe_keys=#10; build_keys=#0] est=54011 rows=36236 batches=2933 time=15.095ms peak=2.1KiB
+          HashJoin #5 [probe_keys=#1, #5; build_keys=#0, #1] est=54011 rows=36236 batches=2933 time=43.374ms peak=1.6MiB
+            HashJoin #6 [probe_keys=#0; build_keys=#2] est=540109 rows=910519 batches=2933 time=201.564ms peak=26.8MiB
+              Scan #7 [lineitem; cols=l_orderkey,l_suppkey,l_extendedprice,l_discount] est=6001215 rows=6001215 batches=2933 time=81.731ms peak=0B buffer=5.6MiB
+              HashJoin #8 [probe_keys=#0; build_keys=#1] est=135000 rows=227597 batches=147 time=28.014ms peak=13.4MiB
+                Scan #9 [customer; cols=c_custkey,c_nationkey] est=150000 rows=150000 batches=74 time=1.051ms peak=0B buffer=1.4MiB
+                Scan #10 [orders; cols=o_orderkey,o_custkey,o_orderdate; filter=((#2 >= DATE '1994-01-01') AND (#2 < DATE '1995-01-01')); prune=(#2 >= DATE '1994-01-01') AND (#2 < DATE '1995-01-01')] est=135000 rows=227597 batches=735 time=51.263ms peak=0B buffer=2.4MiB
+            Scan #11 [supplier; cols=s_suppkey,s_nationkey] est=10000 rows=10000 batches=5 time=0.171ms peak=0B buffer=117.2KiB
+          Scan #12 [nation; cols=n_nationkey,n_name,n_regionkey] est=25 rows=25 batches=1 time=0.140ms peak=0B buffer=481B
+        Scan #13 [region; cols=r_regionkey,r_name; filter=(#1 = 'ASIA'); prune=(#1 = 'ASIA')] est=1 rows=1 batches=1 time=0.261ms peak=0B buffer=78B
+pool_peak=36.7MiB scan_pool_peak=12.2MiB

@@ -1,4 +1,4 @@
-Project #0 [#0 AS revenue] est=1 rows=1 batches=1 time=0.001ms peak=0B
-  HashAggregate #1 [groups=[]; aggs=[SUM((#1 * #2)) -> DECIMAL(38,4)]] est=1 rows=1 batches=1 time=8.469ms peak=281B
-    Scan #2 [lineitem; cols=l_quantity,l_extendedprice,l_discount,l_shipdate; filter=((((#3 >= DATE '1994-01-01') AND (#3 < DATE '1995-01-01')) AND (#2 BETWEEN 0.05 AND 0.07)) AND (#0 < 24.00)); prune=(#3 >= DATE '1994-01-01') AND (#3 < DATE '1995-01-01') AND (#2 BETWEEN 0.05 AND 0.07) AND (#0 < 24.00)] est=48610 rows=114160 batches=2933 time=345.668ms peak=0B buffer=6.1MiB
-pool_peak=33.2KiB scan_pool_peak=12.9MiB
+Project #0 [#0 AS revenue] est=1 rows=1 batches=1 time=0.002ms peak=0B
+  HashAggregate #1 [groups=[]; aggs=[SUM((#1 * #2)) -> DECIMAL(38,4)]] est=1 rows=1 batches=1 time=8.458ms peak=281B
+    Scan #2 [lineitem; cols=l_quantity,l_extendedprice,l_discount,l_shipdate; filter=((((#3 >= DATE '1994-01-01') AND (#3 < DATE '1995-01-01')) AND (#2 BETWEEN 0.05 AND 0.07)) AND (#0 < 24.00)); prune=(#3 >= DATE '1994-01-01') AND (#3 < DATE '1995-01-01') AND (#2 BETWEEN 0.05 AND 0.07) AND (#0 < 24.00)] est=48610 rows=114160 batches=2933 time=343.633ms peak=0B buffer=6.1MiB
+pool_peak=33.5KiB scan_pool_peak=12.9MiB
