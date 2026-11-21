@@ -420,7 +420,9 @@ def check_answers(ctx, specs):
         actual = compare.parse_quarry(done.stdout)
         approx = frozenset(i for i, (_, t) in enumerate(want.columns) if t == "DOUBLE")
         ordered = spec["query"] != AGG_QUERY  # the aggregate has no ORDER BY
-        problems = compare.diff(want, actual, ordered=ordered, approx=approx)
+        # DuckDB names an unaliased aggregate `sum(x)` and quarry `SUM(x)`: names compare in lower case.
+        lowered = lambda r: compare.Result([(n.lower(), t) for n, t in r.columns], r.rows)  # noqa: E731
+        problems = compare.diff(lowered(want), lowered(actual), ordered=ordered, approx=approx)
         if problems:
             raise AnswerMismatch(
                 f"{label}: the answer of quarry differs from DuckDB's:\n  " + "\n  ".join(problems)
