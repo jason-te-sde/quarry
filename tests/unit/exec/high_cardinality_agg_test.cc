@@ -94,8 +94,8 @@ TEST_F(HighCardinalityAggTest, SmallBatchesGiveTheSameAnswer) {
       "SELECT l_orderkey, COUNT(*), SUM(l_extendedprice) FROM lineitem GROUP BY l_orderkey", 7);
 }
 
-// AVG and COUNT per group at batch size 1: one output batch per group. This checks that the answer is
-// the same as at the default batch size. It does not guard against the output becoming quadratic
+// AVG and COUNT per group at batch size 1: one output batch per group. This checks that the answer
+// is the same as at the default batch size. It does not guard against the output becoming quadratic
 // (15,000 squared steps finish in seconds); that is guarded by
 // AggHashTableTest.FinishingInBatchesAllocatesInProportionToTheGroupsFinished.
 TEST_F(HighCardinalityAggTest, AvgAndCountPerOrderKeyAtBatchSizeOneGiveTheSameAnswer) {

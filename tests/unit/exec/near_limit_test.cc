@@ -207,13 +207,13 @@ TEST_F(NearLimitTest, AJoinWhoseBuildRowsNearlyFillTheLimitStaysWithinTheMargin)
   }
 }
 
-// The documented overshoot, pinned. A join concatenates its build side into one array per column and
-// the budget charges one copy of it. When the build input is filtered, is another operator's output
-// or is read back from a spill file, its batches already sit in the operator pool, so the second
-// copy is in the pool too. The pool may then hold the limit, the margin and one more copy of the
-// build payload (ADR 0006, "The margin, and how it is measured"). A fix that charges the concatenation, or
-// releases the parts as they are copied, makes the overshoot zero and this bound can be tightened
-// to `limit + Margin(limit)`.
+// The documented overshoot, pinned. A join concatenates its build side into one array per column
+// and the budget charges one copy of it. When the build input is filtered, is another operator's
+// output or is read back from a spill file, its batches already sit in the operator pool, so the
+// second copy is in the pool too. The pool may then hold the limit, the margin and one more copy of
+// the build payload (ADR 0006, "The margin, and how it is measured"). A fix that charges the
+// concatenation, or releases the parts as they are copied, makes the overshoot zero and this bound
+// can be tightened to `limit + Margin(limit)`.
 TEST_F(NearLimitTest, AJoinWhoseBuildInputIsFilteredStaysWithinTheLimitMarginAndOneBuildCopy) {
   WriteWide();
   // The filter drops about one row in 26, so every batch of the scan carries a selection.
@@ -222,7 +222,8 @@ TEST_F(NearLimitTest, AJoinWhoseBuildInputIsFilteredStaysWithinTheLimitMarginAnd
       "WHERE w.t > 'b'";
   const QueryResult reference = Run(sql, 0);
   Report("filtered", 0, reference);
-  // The payload of the build rows that pass the filter: the key, the 400 bytes of text and its offset.
+  // The payload of the build rows that pass the filter: the key, the 400 bytes of text and its
+  // offset.
   const int64_t build_payload = kWideRows * (8 + 400 + 4) * 25 / 26;
   for (const int64_t limit : {2 * kMiB, 8 * kMiB, 16 * kMiB}) {
     const QueryResult result = Run(sql, limit);
