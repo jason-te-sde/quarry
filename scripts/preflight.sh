@@ -101,7 +101,20 @@ build_and_test dev
 stage "no arrow::compute in the objects"
 bash scripts/check-objects.sh build/dev
 
-build_and_test asan
+# AddressSanitizer on macOS reports memory errors that are inside Arrow, not in quarry. Checked on
+# the failing runs: the frame on top of every report is a libarrow or libparquet frame (a 16-byte
+# memcpy in parquet::arrow FileReaderImpl::DecodeRowGroups that reads past the end of a buffer it was
+# handed by the reader itself, and libc++ container annotations that trip when a vector built in
+# instrumented code is relocated by the uninstrumented libarrow, in IpcFormatWriter and
+# SchemaManifest::GetFieldIndices), reached from quarry only through ReadRowGroup and the IPC
+# writer. They stop Spill, Engine, Tpch, TpchBudget, HighCardinalityAgg, NearLimit and SqlRunner at
+# their first scan or spill. CI runs the same tests under AddressSanitizer on Linux, where Arrow's
+# frames are not reported, so the stage is skipped here instead of failing every run.
+if [ "$(uname -s)" = Darwin ]; then
+  stage "asan: skipped on macOS (reports inside libarrow and libparquet; CI runs it on Linux)"
+else
+  build_and_test asan
+fi
 
 # The README stage builds the release preset, which the stages below use.
 stage "the README's commands (they build the release preset)"

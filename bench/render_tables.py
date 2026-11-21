@@ -289,14 +289,60 @@ def render_spill(root):
     )
 
 
+BEFORE_FIXES = RESULTS / "before-review-fixes"
+
+
+def render_fix_wave(root):
+    """The four queries before and after the fixes of the whole-branch review: quarry's median and its
+    ratio to single-threaded DuckDB in each of the two main results, and the two spill-suite cells that
+    the fixes were most likely to move (the high-cardinality aggregate)."""
+    new = newest(root, "main")
+    old = newest(root, "main", BEFORE_FIXES)
+    if not new or not old:
+        return NO_RESULT
+    rows = []
+    for q in MAIN_QUERIES:
+        cells = []
+        for _, document in (old, new):
+            quarry = pick(document["cells"], engine="quarry", query=q)
+            one = pick(document["cells"], engine="duckdb", config="threads=1", query=q)
+            cells.append((quarry, one))
+        (q_old, d_old), (q_new, d_new) = cells
+        if any(c["status"] != "ok" for c in (q_old, d_old, q_new, d_new)):
+            rows.append([QUERY_LABEL[q]] + ["-"] * 5)
+            continue
+        rows.append(
+            [
+                QUERY_LABEL[q], ms(q_old["median_ms"]), ms(q_new["median_ms"]),
+                f"{q_old['median_ms'] / d_old['median_ms']:.2f}", f"{q_new['median_ms'] / d_new['median_ms']:.2f}",
+                f"{(q_new['median_ms'] / q_old['median_ms'] - 1) * 100:+.1f}%",
+            ]
+        )
+    header = [
+        "Query", "quarry before (ms)", "quarry after (ms)", "ratio before", "ratio after", "quarry time change",
+    ]
+    return "\n".join(
+        [
+            table(header, rows),
+            "",
+            f"Before: `{old[0]}` (commit `{old[1]['repo_commit'][:12]}`). After: `{new[0]}` "
+            f"(commit `{new[1]['repo_commit'][:12]}`). The ratio is quarry's median over DuckDB's, "
+            "`threads=1`, in the same result file.",
+        ]
+    )
+
+
 PROFILE_DIR = RESULTS / "profile"
 BEFORE_DIR = PROFILE_DIR / "before-join-estimate-fix"
+FIXES_DIR = PROFILE_DIR / "before-review-fixes"
 # (directory, file name stem, label). The first Q5 is the plan that ships; the last Q5 profile is
 # the one taken before the join-estimate fix, kept and labelled as such.
 PROFILE_SOURCES = [
     (PROFILE_DIR, "q1", "Q1"), (PROFILE_DIR, "q3", "Q3"), (PROFILE_DIR, "q5", "Q5"),
     (PROFILE_DIR, "q5-without-order_joins", "Q5, `order_joins` off"), (PROFILE_DIR, "q6", "Q6"),
     (BEFORE_DIR, "q5", "Q5, before the join-estimate fix"),
+    (FIXES_DIR, "q1", "Q1, before the fixes of the whole-branch review"),
+    (FIXES_DIR, "q5", "Q5, before the fixes of the whole-branch review"),
 ]
 OPERATOR_LINE = re.compile(r"^\s*(\w+) #(\d+) .*? rows=(\d+) .*?time=([\d.]+)ms peak=(\S+)")
 
@@ -391,6 +437,7 @@ PROFILE_TAGS = {
     "q1": (PROFILE_DIR, "q1"), "q3": (PROFILE_DIR, "q3"), "q5": (PROFILE_DIR, "q5"),
     "q5off": (PROFILE_DIR, "q5-without-order_joins"), "q6": (PROFILE_DIR, "q6"),
     "q5before": (BEFORE_DIR, "q5"),
+    "q1fixes": (FIXES_DIR, "q1"), "q5fixes": (FIXES_DIR, "q5"),
 }
 
 
@@ -424,6 +471,9 @@ def build_facts(root):
     found = newest(root, "main", BEFORE_RESULTS)
     if found:
         add_main_facts(facts, "before.main.", found[1])
+    found = newest(root, "main", BEFORE_FIXES)
+    if found:
+        add_main_facts(facts, "fixes.before.main.", found[1])
     found = newest(root, "ablation")
     if found:
         cells = found[1]["cells"]
@@ -446,11 +496,18 @@ def build_facts(root):
             if c["status"] == "ok":
                 facts[f"spill.{c['query']}.{c['config']}.ms"] = ms(c["median_ms"])
                 facts[f"spill.{c['query']}.{c['config']}.spilled"] = mib(c["spilled_bytes"])
+                facts[f"spill.{c['query']}.{c['config']}.state"] = mib(c["pool_peak_bytes"])
     found = newest(root, "spill", BEFORE_RESULTS)
     if found:
         for c in found[1]["cells"]:
             if c["status"] == "ok":
                 facts[f"before.spill.{c['query']}.{c['config']}.ms"] = ms(c["median_ms"])
+    found = newest(root, "spill", BEFORE_FIXES)
+    if found:
+        for c in found[1]["cells"]:
+            if c["status"] == "ok":
+                facts[f"fixes.before.spill.{c['query']}.{c['config']}.ms"] = ms(c["median_ms"])
+                facts[f"fixes.before.spill.{c['query']}.{c['config']}.state"] = mib(c["pool_peak_bytes"])
     for tag, (directory, name) in PROFILE_TAGS.items():
         path = root / directory / f"explain-analyze-{name}.txt"
         if path.exists():
@@ -496,6 +553,7 @@ BLOCKS = {
     "ablation-pruning": render_pruning,
     "ablation-rules": render_rules,
     "spill": render_spill,
+    "fix-wave": render_fix_wave,
 }
 MARKER = re.compile(r"(<!-- bench:([a-z-]+) -->\n)(.*?)\n?(<!-- /bench:\2 -->)", re.DOTALL)
 

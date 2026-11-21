@@ -144,6 +144,10 @@ per flaw. A flaw that gets through means the suite cannot see that kind of bug.
 - Data larger than scale factor 1, and the behaviour of a real machine that runs out of memory:
   spilling is tested within a budget the process can afford, with the memory measured through the
   query's Arrow pool.
+- AddressSanitizer on macOS. The suite runs under it on Linux, in CI. On macOS the tests that scan a
+  Parquet file or write a spill file stop at reports whose top frames are in libarrow and
+  libparquet (an over-read in the reader's `DecodeRowGroups`, and libc++ container annotations that
+  trip inside Arrow's IPC writer), so `scripts/preflight.sh` skips that stage on macOS and says why.
 - Concurrent queries: an `Engine` runs one query at a time and refuses a second by construction.
 - DuckDB's own errors: when the reference is wrong, both engines may be wrong together. One result,
   a join with a filter and an aggregate, is worked out by hand from its rows and asserted in
