@@ -31,6 +31,7 @@ SCRIPT_ROOT = SCRIPT_DIR.parent
 
 RUNS = 5  # measured runs after one warm-up
 EXECUTION_TIMEOUT_S = 600
+CELL_LIMIT_S = 1200  # a cell's process is killed after this long: the 600 s cap above is cooperative
 LOAD_LIMIT = 1.5
 LOAD_WAIT_S = 120
 RESULTS_DIR = "bench/results"
@@ -311,10 +312,22 @@ def run_cell(spec, ctx):
                 "--threads", spec["threads"], "--repeat", str(RUNS), "--timeout", str(EXECUTION_TIMEOUT_S),
                 "--out", str(out), *wait,
             ]
-        done = subprocess.run(
-            command, cwd=ctx["root"], capture_output=True, text=True,
-            timeout=(RUNS + 1) * (EXECUTION_TIMEOUT_S + LOAD_WAIT_S) + 120,
-        )
+        proc = subprocess.Popen(command, cwd=ctx["root"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            _, stderr = proc.communicate(timeout=ctx["cell_limit_s"])
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            cell_result = {k: spec[k] for k in ("engine", "config", "query", "dataset", "group")}
+            cell_result.update(
+                {
+                    "status": "timeout",
+                    "error": f"the process was killed after the cell limit of {ctx['cell_limit_s']} s",
+                    "load_flag": False,
+                }
+            )
+            return cell_result
+        done = subprocess.CompletedProcess(command, proc.returncode, "", stderr)
         if not out.exists():
             raise RuntimeError(
                 f"{spec['engine']} {spec['config']} {spec['query']} wrote no timing (exit {done.returncode}): "
@@ -370,6 +383,7 @@ def main(argv=None):
     parser.add_argument("--build-dir", type=Path, default=Path("build/release"))
     parser.add_argument("--quarry", type=Path, help="the quarry binary (default: <build-dir>/tools/quarry)")
     parser.add_argument("--no-build", action="store_true", help="do not run cmake --build first")
+    parser.add_argument("--cell-limit", type=int, default=CELL_LIMIT_S, help="seconds before a cell's process is killed")
     parser.add_argument(
         "--no-load-wait",
         action="store_true",
@@ -406,6 +420,7 @@ def main(argv=None):
             "data": datasets,
             "sql": sql,
             "wait_for_load": args.suite != "smoke" and not args.no_load_wait,
+            "cell_limit_s": args.cell_limit,
         }
 
         import duckdb
@@ -430,6 +445,7 @@ def main(argv=None):
                 "load_limit": LOAD_LIMIT,
                 "load_wait_s": LOAD_WAIT_S if ctx["wait_for_load"] else 0,
                 "execution_timeout_s": EXECUTION_TIMEOUT_S,
+                "cell_limit_s": args.cell_limit,
             },
             "queries": {q: {"sha256": hashlib.sha256(s.encode()).hexdigest()} for q, s in sql.items()},
             "cells": [],
@@ -447,7 +463,7 @@ def main(argv=None):
             shown = f"{result['median_ms']:.1f} ms" if result["status"] == "ok" else result["status"]
             print(
                 f"[{n}/{len(specs)}] {spec['engine']} {spec['config']} {spec['query']} ({spec['dataset']}): "
-                f"{shown}, load {max([result['warmup_load_1m'], *result['load_1m']])}",
+                f"{shown}, load {max([result.get('warmup_load_1m', 0), *result.get('load_1m', [])])}",
                 file=sys.stderr,
             )
 

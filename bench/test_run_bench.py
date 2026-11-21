@@ -245,6 +245,24 @@ class RunBenchTest(unittest.TestCase):
                 self.assertIn("resource exhausted", cell["error"])
                 self.assertNotIn("median_ms", cell)
 
+    def test_a_cell_that_outlives_the_cell_limit_is_killed_and_recorded(self):
+        wrapper = self.tools / "quarry-that-hangs"
+        write_script(
+            wrapper,
+            "import os, sys, time\n"
+            "if '--timing-json' in sys.argv:\n"
+            "    time.sleep(600)\n"
+            f"os.execv({str(QUARRY)!r}, [{str(QUARRY)!r}] + sys.argv[1:])\n",
+        )
+        done = self.run_bench(suite="spill", quarry=wrapper, extra=("--cell-limit", "1"))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        cells = json.loads(self.results()[0].read_text())["cells"]
+        self.assertEqual(len(cells), 12)
+        for cell in cells:
+            self.assertEqual(cell["status"], "timeout")
+            self.assertIn("cell limit", cell["error"])
+            self.assertNotIn("median_ms", cell)
+
 
 if __name__ == "__main__":
     unittest.main()

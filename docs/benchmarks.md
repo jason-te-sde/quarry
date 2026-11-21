@@ -73,6 +73,13 @@ tables show that idle figure next to the peak instead of subtracting it.
 An execution that fails is the result of its cell, recorded with the error text. An execution that
 takes longer than 600 seconds is stopped and recorded as a timeout. Neither is retried or dropped.
 
+The 600-second cap is checked by the engine between batches, so it does not fire in a process that is
+blocked in swap. A cell whose process is still running 1,200 seconds after it started is therefore
+killed by the harness and recorded as a timeout, with no statistics. This rule was added after the
+first ablation attempt, when quarry at batch size 1 on Q5 grew to a 68 GB footprint and ran for over
+an hour without reaching the cap. Results of the `main` suite (taken before the rule) are unaffected:
+none of their cells came near either limit.
+
 ## Correctness before timing
 
 Before the `main` suite times anything, quarry's answer to each of the four queries on the SF1
