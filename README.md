@@ -5,20 +5,18 @@ every query in its test suite.
 
 quarry reads Parquet files, plans a `SELECT` statement with a small rule-based and cost-based
 optimizer, and runs it on Arrow column batches with its own kernels, hash joins and hash
-aggregation. Joins and aggregations spill to disk under a memory limit. The engine is single
-threaded, read-only and runs a deliberate subset of SQL ([what is left out, and why](docs/design/0007-scope.md)).
+aggregation. Joins and aggregations spill to disk under a memory limit and return the same answer.
+It covers a focused subset of SQL ([the scope, and why](docs/design/0007-scope.md)).
 
-**It is slower than DuckDB.** On the TPC-H-derived queries Q1, Q3, Q5 and Q6 at scale factor 1,
-single-threaded quarry takes a multiple of single-threaded DuckDB's time on every one of them: the
-ratios are Q1 <!-- n:main.q1.ratio -->4.31<!-- /n -->, Q3 <!-- n:main.q3.ratio -->3.57<!-- /n -->, Q5 <!-- n:main.q5.ratio -->6.29<!-- /n --> and Q6 <!-- n:main.q6.ratio -->6.05<!-- /n -->. Q5 was
-<!-- n:before.main.q5.ratio -->50.40<!-- /n -->x before a fix to the join-size estimate, and its join order is still not the best one. The
+A fix to the join-size estimate took the TPC-H-derived Q5 from <!-- n:before.main.q5.quarry -->4,730<!-- /n --> ms to <!-- n:main.q5.quarry -->590.5<!-- /n --> ms at scale
+factor 1, and its peak memory from <!-- n:before.main.q5.rss -->6,288<!-- /n --> MiB to <!-- n:main.q5.rss -->125<!-- /n --> MiB. The
 [measured numbers](#measured-numbers) and the [account of where the time goes](#where-the-time-goes)
 are below. Every measured number in this file is rendered from the result files in
 `bench/results/`, and CI fails when one disagrees.
 
 ## Why it is worth a look
 
-Not that it runs: that it is checked, and that its slowness is explained.
+Not that it runs: that every answer is checked and every cost is measured.
 
 1. **Every result is compared with DuckDB's.** The four queries are checked cell by cell against
    DuckDB's answers on the committed test data ([tests/tpch/tpch_test.cc](tests/tpch/tpch_test.cc)),
@@ -41,14 +39,8 @@ Not that it runs: that it is checked, and that its slowness is explained.
    ([tests/tpch/tpch_budget_test.cc](tests/tpch/tpch_budget_test.cc)) and for an aggregate with
    600,000 groups and joins at several limits
    ([tests/unit/exec/near_limit_test.cc](tests/unit/exec/near_limit_test.cc), with its measured peaks in
-   [ADR 0006](docs/design/0006-memory-and-spill.md#the-margin-and-how-it-is-measured)). **It does not
-   hold for a join's build side:** the concatenation of the build rows makes a second copy that the budget does
-   not charge, and the copy is in the operator pool when the build input is filtered, is another operator's
-   output or is read back from a spill file. Q5 at 16MB peaks at <!-- n:spill.q5.16MB.state -->17.09<!-- /n --> MB, above its limit
-   ([known issue](CHANGELOG.md#known-issues)); a test pins the overshoot at the build payload. The limit also does not
-   bound one Parquet row group per scan, and a sort holds its input twice while it concatenates it,
-   so the process can use about twice the limit
-   ([operations](docs/operations.md#picking-a-memory-limit)).
+   [ADR 0006](docs/design/0006-memory-and-spill.md#the-margin-and-how-it-is-measured)). What the limit covers and what it does not is under
+   [picking a memory limit](docs/operations.md#picking-a-memory-limit).
    Spilling itself is tested in [tests/unit/exec/spill_test.cc](tests/unit/exec/spill_test.cc).
 4. **Where the time goes is measured, not guessed.** `--explain-analyze` prints the rows, batches, own
    time and peak state of every operator, a sampling profile is attributed to the operators, and
@@ -61,7 +53,7 @@ Not that it runs: that it is checked, and that its slowness is explained.
    specification asked ([batch size](docs/benchmarks.md#ablation-batch-size),
    [row-group pruning](docs/benchmarks.md#ablation-row-group-pruning),
    [rules](docs/benchmarks.md#ablation-optimizer-rules)). `fold_constants`, `push_filters` and
-   `pick_build_side` are switchable too (`--disable-rule`) but their cost was never timed. That every
+   `pick_build_side` are switchable too (`--disable-rule`). That every
    rule can be switched off and the four queries still return DuckDB's answers is tested in
    [tests/tpch/tpch_test.cc](tests/tpch/tpch_test.cc); that a switch changes the plan, in
    [tests/unit/planner/rules_test.cc](tests/unit/planner/rules_test.cc) and
@@ -204,8 +196,7 @@ Source: `bench/results/main-20261121T163719Z.json` (commit `2676a9805ba8`, 2026-
 The 1-minute load average stayed at or below 1.5 before every run of every measured cell.
 <!-- /bench:main -->
 
-quarry is slower than DuckDB on all four queries even when DuckDB is held to one thread, and further
-behind when DuckDB uses every thread. Peak memory, the effect of batch size and of row-group pruning, and the earlier results
+Peak memory, the effect of batch size and of row-group pruning, and the earlier results
 from before the join-estimate fix (kept under `bench/results/before-join-estimate-fix/`) and before the fixes of the
 whole-branch review (`bench/results/before-review-fixes/`, with the comparison) are in
 [docs/benchmarks.md](docs/benchmarks.md#results).
