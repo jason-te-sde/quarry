@@ -56,10 +56,27 @@ budget first; under AddressSanitizer it is a heap-use-after-free without the sha
 ### Spill files
 
 Spill files use the Arrow IPC stream format, uncompressed, one file per partition, in a directory
-that exists for one query: `SpillDirectory::Create(parent)` makes `quarry-spill-XXXXXX` under
+that exists for one query: `SpillDirectory::Create(parent)` makes `quarry-spill-<pid>-XXXXXX` under
 `EngineOptions::spill_parent` (the system temporary directory when empty) and its destructor removes
 it recursively. The engine owns it for the length of `Execute`, so an error, a cancel or a timeout
-leaves nothing behind. It is created only when a limit is set.
+leaves nothing behind. It is created only when a limit is set. A process that dies without the
+destructor leaves its directory, so `Create` first removes the directories under `parent` that are
+quarry's own and whose owner is gone: an entry that `symlink_status` reports as a directory (a file or
+a symlink with a matching name is left alone), named exactly `quarry-spill-<pid>-` and six alphanumeric
+characters, whose pid `kill(pid, 0)` reports as `ESRCH`. A live process, another user's process (`EPERM`)
+and a reused pid all keep their directory. The sweep is best effort: it reads and removes with
+`error_code` overloads and never fails `Create`.
+
+A pid means something only within one PID namespace on one host, and there is no lock or marker file to
+say otherwise, so a spill parent must not be shared between PID namespaces or hosts. If it is, a live
+peer's directory reads as a dead process's and is removed. The peer's query fails with an `IOError` and
+returns no rows: its next `SpillWriter::Open` or `SpillReader::Open` of a file under the removed
+directory fails with `ENOENT` (a file already open stays readable and writable through its descriptor,
+but every spill file is reopened by path to be read back, and the engine returns an error rather than a
+partial result). The cost of a lock was judged larger than the benefit: the supported setup is one
+spill parent per host and PID namespace, which the default (the system temporary directory) is on a
+normal host, though on Linux it is shared by all users of the host and by any container that bind-mounts
+it.
 
 A `SpillWriter` buffers rows until 4 KiB are pending and then writes one record batch, so that one
 partition's share of an input batch (a few dozen rows) does not become a record batch of its own;

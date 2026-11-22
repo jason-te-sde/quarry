@@ -56,6 +56,8 @@ These are **out of scope**:
 - anything that needs write access to the directory the spill files are in, or to the Parquet files
   being queried, and intends only what that access already allows. quarry does not authenticate or
   encrypt its spill files, and does not protect against another process that can write there.
+  That includes deleting: a writer there can name a directory `quarry-spill-<pid>-XXXXXX` for a dead
+  pid and have the next query remove it.
 - a denial of service by a legitimate workload: a large join takes a long time, and a query can be
   ended with `--timeout` or Ctrl-C.
 - a flaw in a dependency used only for tests or measurements (GoogleTest, DuckDB, the Python tools):
