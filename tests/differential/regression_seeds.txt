@@ -18,9 +18,15 @@
 #   still makes 236 million join rows before the filter runs, which batch size 7 cannot finish in the
 #   120 s timeout; the size guard counted only the filtered rows. The runner now also counts the FROM
 #   alone when push_filters is off; test: UnfilteredSizeTest in tests/differential/test_run.py.
+# 1769: a hash aggregate without GROUP BY, above a join, under --memory-limit 64KiB, crashed in some
+#   runs and not in others (SIGSEGV). The aggregate spilled its one group, which has the empty key
+#   and is not in the key index, and the hash it spilled by read that index past the end of its
+#   offsets. Fixed in AggHashTable::KeyHash (src/exec/agg_hash_table.cc); test:
+#   AggHashTableTest.KeyHashIsTheHashOfTheKeyColumnsAndOfTheEmptyKeyWithoutKeys.
 368
 934
 946
 224
 243
 4776
+1769
