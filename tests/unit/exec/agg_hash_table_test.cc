@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "exec/spill_partitions.h"
 #include "support/arrays.h"
 
 // Counts the bytes that the C++ heap hands out (operator new) while a test has the counter on. The
@@ -415,6 +416,30 @@ TEST(AggHashTableTest, AGroupWithoutKeysMergesToo) {
     ASSERT_TRUE(merged.MergePartial({}, *columns, 1).ok());
   }
   EXPECT_EQ(Rows(merged), Rows(whole));
+}
+
+// A spilled group goes to the partition of KeyHash, and a merge that splits a file again forwards
+// its rows by HashKeyRows of the key columns, so the two must agree. Without GROUP BY the one group
+// has the empty key and is not in the key index; every spill of it must land in the one partition
+// the empty key hashes to, or its partial states end up in several files and the query answers one
+// row per file. KeyHash read the key index for it, past the end of its offsets: the hash was
+// whatever memory followed, and the read crashed now and then (seed 1769 of the differential
+// nightly, under --memory-limit 64KiB).
+TEST(AggHashTableTest, KeyHashIsTheHashOfTheKeyColumnsAndOfTheEmptyKeyWithoutKeys) {
+  std::vector<uint64_t> hashes;
+  std::vector<uint8_t> any_null;
+
+  AggHashTable keyed({LogicalType::Int64()}, {CountStar()});
+  ASSERT_TRUE(keyed.Update({Int64Array({7, 9})}, {nullptr}, 2).ok());
+  ASSERT_TRUE(HashKeyRows({Int64Array({7, 9})}, 2, &hashes, &any_null).ok());
+  EXPECT_EQ(keyed.KeyHash(0), hashes[0]);
+  EXPECT_EQ(keyed.KeyHash(1), hashes[1]);
+
+  AggHashTable global({}, {CountStar()});
+  ASSERT_TRUE(global.Update({}, {nullptr}, 3).ok());
+  ASSERT_EQ(global.num_groups(), 1);
+  ASSERT_TRUE(HashKeyRows({}, 1, &hashes, &any_null).ok());
+  EXPECT_EQ(global.KeyHash(0), hashes[0]);
 }
 
 TEST(AggHashTableTest, ASpillableTableReportsOverBudgetInsteadOfFailingAndClearReturnsTheCharge) {

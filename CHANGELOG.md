@@ -9,6 +9,12 @@ a minor release may change the SQL it accepts, the library API and the command l
 
 ### Fixed
 
+- An aggregate without `GROUP BY` that spilled under a memory limit could crash with a segmentation
+  fault, in some runs of a query and not in others (the query that found it aggregates a three-way
+  join under `--memory-limit 64KiB`). The partition its one group was written to was chosen by a
+  hash read from past the end of an array; it is now the hash of the empty key, so every spill of
+  that group goes to the same file and is merged into the one row. Found by the nightly differential
+  run (seed 1769, now a regression seed).
 - Spill directories left by a process that died without cleanup (SIGKILL, a crash, a second Ctrl-C)
   are now removed instead of piling up in the temporary directory: they are named
   `quarry-spill-<pid>-XXXXXX`, and the next query with a memory limit under the same spill parent

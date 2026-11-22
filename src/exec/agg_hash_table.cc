@@ -775,7 +775,11 @@ void AggHashTable::Clear() {
   charged_ = 0;
 }
 
-uint64_t AggHashTable::KeyHash(int64_t group) const { return index_.Hash(index_.key(group)); }
+uint64_t AggHashTable::KeyHash(int64_t group) const {
+  // Without key columns the one group, the global one, has the empty key and no entry in the index.
+  if (key_types_.empty()) return index_.Hash({});
+  return index_.Hash(index_.key(group));
+}
 
 AggHashTable::~AggHashTable() = default;
 

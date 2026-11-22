@@ -81,7 +81,8 @@ class AggHashTable {
   arrow::Result<bool> MergePartial(const std::vector<std::shared_ptr<arrow::Array>>& keys,
                                    const std::vector<std::shared_ptr<arrow::Array>>& partials,
                                    int64_t n);
-  // The hash a spill partitions group `group` by: of the same key bytes a probe compares.
+  // The hash a spill partitions group `group` by: of the same key bytes a probe compares, so it
+  // equals HashKeyRows of the group's key columns. Without key columns, the hash of the empty key.
   uint64_t KeyHash(int64_t group) const;
 
  private:
