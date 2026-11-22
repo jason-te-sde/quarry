@@ -100,10 +100,10 @@ build/release/tools/quarry query --data tests/data/tpch-sf0.01 -f tests/tpch/que
 (`--format`), or the plan (`--explain`), or the plan with what every operator did
 (`--explain-analyze`). `--memory-limit`, `--batch-size`, `--disable-rule` and `--timeout` set the
 engine's options; `quarry query --help` lists them all. The library is one class,
-`quarry::Engine` ([include/quarry/engine.h](include/quarry/engine.h)). Version 0.1.0 has no install
-step, no exported CMake package and no `examples/` directory (the specification planned one): to use
-the library, add this repository with `add_subdirectory` and link the `quarry_engine` target, as
-`tools/` does.
+`quarry::Engine` ([include/quarry/engine.h](include/quarry/engine.h)). The 0.1 releases have no
+install step, no exported CMake package and no `examples/` directory (the specification planned
+one): to use the library, add this repository with `add_subdirectory` and link the `quarry_engine`
+target, as `tools/` does.
 
 Check the engine against DuckDB yourself. This runs a short range of random seeds on quarry and on
 the DuckDB that `uv.lock` pins, and needs [uv](https://docs.astral.sh/uv/):

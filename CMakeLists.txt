@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
 project(quarry
-  VERSION 0.1.0
+  VERSION 0.1.1
   DESCRIPTION "A vectorized SQL query engine in C++20 over Apache Arrow and Parquet"
   LANGUAGES CXX)
 
