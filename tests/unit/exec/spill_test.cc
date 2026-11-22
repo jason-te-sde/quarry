@@ -1,4 +1,6 @@
 #include <gtest/gtest.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
@@ -241,6 +243,46 @@ TEST(SpillDirectoryTest, ItIsUniqueAndGoneAfterTheDestructor) {
 TEST(SpillDirectoryTest, ACreateUnderAMissingParentFails) {
   TempDir parent;
   EXPECT_FALSE(SpillDirectory::Create(parent.path() / "missing").ok());
+}
+
+// The pid of a child that has exited and been reaped: no process has it until it is reused.
+pid_t DeadPid() {
+  const pid_t child = ::fork();
+  if (child == 0) ::_exit(0);
+  ::waitpid(child, nullptr, 0);
+  return child;
+}
+
+TEST(SpillDirectoryTest, ItsNameCarriesThePid) {
+  TempDir parent;
+  auto directory = SpillDirectory::Create(parent.path());
+  ASSERT_TRUE(directory.ok());
+  EXPECT_TRUE((*directory)
+                  ->path()
+                  .filename()
+                  .string()
+                  .starts_with("quarry-spill-" + std::to_string(::getpid()) + "-"));
+}
+
+// A process that dies without the destructor leaves its directory; the next Create removes it, and
+// only it.
+TEST(SpillDirectoryTest, ACreateRemovesTheDirectoriesOfDeadProcesses) {
+  TempDir parent;
+  const fs::path dead = parent.path() / ("quarry-spill-" + std::to_string(DeadPid()) + "-AbC123");
+  const fs::path live = parent.path() / ("quarry-spill-" + std::to_string(::getppid()) + "-AbC123");
+  const fs::path old_style = parent.path() / "quarry-spill-AbC123";
+  const fs::path other = parent.path() / "quarry-spill-12x-AbC123";
+  for (const fs::path& path : {dead, live, old_style, other}) {
+    fs::create_directories(path / "nested");
+    std::ofstream(path / "nested" / "x.spill") << "data";
+  }
+  auto directory = SpillDirectory::Create(parent.path());
+  ASSERT_TRUE(directory.ok());
+  EXPECT_FALSE(fs::exists(dead));
+  EXPECT_TRUE(fs::exists(live));
+  EXPECT_TRUE(fs::exists(old_style));
+  EXPECT_TRUE(fs::exists(other));
+  EXPECT_TRUE(fs::exists((*directory)->path()));
 }
 
 // The directory of a query is removed whatever the outcome. The query spills a lot: the 15000

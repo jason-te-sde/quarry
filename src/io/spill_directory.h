@@ -15,9 +15,16 @@ namespace quarry {
 // under `parent` (which must exist); the destructor removes it with everything in it, so a query
 // that fails, is cancelled or times out leaves nothing behind as long as its SpillDirectory is
 // destroyed.
+//
+// The name carries the creating process's pid, `quarry-spill-<pid>-XXXXXX`. A process that dies
+// without running the destructor (SIGKILL, a crash, a second Ctrl-C) leaves its directory behind;
+// Create removes every such directory under `parent` whose process no longer exists.
 class SpillDirectory {
  public:
   static arrow::Result<std::unique_ptr<SpillDirectory>> Create(const std::filesystem::path& parent);
+  // Removes the directories under `parent` left by processes that no longer exist. Best effort;
+  // Create calls it.
+  static void RemoveOrphans(const std::filesystem::path& parent);
   ~SpillDirectory();
   SpillDirectory(const SpillDirectory&) = delete;
   SpillDirectory& operator=(const SpillDirectory&) = delete;

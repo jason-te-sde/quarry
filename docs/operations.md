@@ -70,12 +70,14 @@ A second Ctrl-C ends the `quarry` process at once, without cleanup: the first on
 
 ## Where spill files go
 
-In a directory `quarry-spill-XXXXXX` created under `EngineOptions::spill_parent`, or the system
+In a directory `quarry-spill-<pid>-XXXXXX` created under `EngineOptions::spill_parent`, or the system
 temporary directory (`$TMPDIR`, else `/tmp`) when that is empty. The directory is created when a
 query starts with a limit and removed, with everything in it, when the query ends: success, error,
 Ctrl-C (SIGINT cancels the query and the CLI exits 130 after the directory is gone) or timeout.
-Only a process killed with SIGKILL, a second Ctrl-C, or a power loss leaves one behind; delete the old
-`quarry-spill-*` directories by hand.
+Only a process killed with SIGKILL, a crash, a second Ctrl-C, or a power loss leaves one behind, and
+the next query with a limit removes it: before creating its own directory, quarry deletes every
+`quarry-spill-<pid>-*` under the same parent whose process no longer exists. Directories named
+`quarry-spill-XXXXXX`, without a pid, come from older versions and must be deleted by hand.
 
 The files hold Arrow IPC streams, uncompressed. A query can need disk for every row of its spilled
 inputs once per split, so budget disk at a few times the size of the joined and grouped columns.

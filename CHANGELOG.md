@@ -7,6 +7,12 @@ a minor release may change the SQL it accepts, the library API and the command l
 
 ## [Unreleased]
 
+### Fixed
+
+- Spill directories left by a process that died without cleanup (SIGKILL, a crash, a second Ctrl-C)
+  no longer pile up in the temporary directory: they are named `quarry-spill-<pid>-XXXXXX`, and the
+  next query with a memory limit removes those whose process no longer exists.
+
 ## [0.1.0] - 2026-11-21
 
 The first release.

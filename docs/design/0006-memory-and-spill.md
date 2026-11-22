@@ -56,10 +56,12 @@ budget first; under AddressSanitizer it is a heap-use-after-free without the sha
 ### Spill files
 
 Spill files use the Arrow IPC stream format, uncompressed, one file per partition, in a directory
-that exists for one query: `SpillDirectory::Create(parent)` makes `quarry-spill-XXXXXX` under
+that exists for one query: `SpillDirectory::Create(parent)` makes `quarry-spill-<pid>-XXXXXX` under
 `EngineOptions::spill_parent` (the system temporary directory when empty) and its destructor removes
 it recursively. The engine owns it for the length of `Execute`, so an error, a cancel or a timeout
-leaves nothing behind. It is created only when a limit is set.
+leaves nothing behind. It is created only when a limit is set. A process that dies without the
+destructor leaves its directory, so `Create` first removes the `quarry-spill-<pid>-*` directories under
+`parent` whose pid names no live process (`kill(pid, 0)` failing with `ESRCH`).
 
 A `SpillWriter` buffers rows until 4 KiB are pending and then writes one record batch, so that one
 partition's share of an input batch (a few dozen rows) does not become a record batch of its own;
