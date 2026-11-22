@@ -7,6 +7,8 @@ a minor release may change the SQL it accepts, the library API and the command l
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-22
+
 ### Fixed
 
 - An aggregate without `GROUP BY` that spilled under a memory limit could crash with a segmentation
@@ -148,5 +150,6 @@ Found before this release and not fixed in it; each is small, and none returns a
   result that every variant's answer was checked.
 
 
-[Unreleased]: https://github.com/jason-te-sde/quarry/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jason-te-sde/quarry/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/jason-te-sde/quarry/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/jason-te-sde/quarry/releases/tag/v0.1.0
