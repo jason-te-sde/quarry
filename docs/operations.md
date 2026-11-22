@@ -74,10 +74,21 @@ In a directory `quarry-spill-<pid>-XXXXXX` created under `EngineOptions::spill_p
 temporary directory (`$TMPDIR`, else `/tmp`) when that is empty. The directory is created when a
 query starts with a limit and removed, with everything in it, when the query ends: success, error,
 Ctrl-C (SIGINT cancels the query and the CLI exits 130 after the directory is gone) or timeout.
-Only a process killed with SIGKILL, a crash, a second Ctrl-C, or a power loss leaves one behind, and
-the next query with a limit removes it: before creating its own directory, quarry deletes every
-`quarry-spill-<pid>-*` under the same parent whose process no longer exists. Directories named
-`quarry-spill-XXXXXX`, without a pid, come from older versions and must be deleted by hand.
+Only a process killed with SIGKILL, a crash, a second Ctrl-C, or a power loss leaves one behind. The
+next query with a limit that uses the same parent removes it, unless its pid has been reused since:
+before creating its own directory, quarry deletes every directory named `quarry-spill-<pid>-` and six
+letters or digits under that parent whose process no longer exists. Files, symlinks and any other
+names are never touched, nor are the directories of live processes, of other users' processes, or of
+`quarry-spill-XXXXXX` without a pid, which come from older versions and must be deleted by hand. The
+sweep is best effort: a directory it cannot remove stays until a later query or until you delete it.
+
+Do not share a spill parent between PID namespaces or hosts: two containers that bind-mount the same
+`spill_parent` or `/tmp`, or two machines on a network filesystem. A pid is only meaningful inside its
+own namespace, so one process's sweep deletes the directory of another that is still running, and that
+query fails with an IOError the next time it creates or reads back a spill file; it does not return
+wrong results. Give each container or host its own `spill_parent`. The default, `$TMPDIR` else `/tmp`,
+is on the local host, but on Linux `/tmp` is shared by every user of the host, not per user, and it is
+shared with every container that mounts it.
 
 The files hold Arrow IPC streams, uncompressed. A query can need disk for every row of its spilled
 inputs once per split, so budget disk at a few times the size of the joined and grouped columns.

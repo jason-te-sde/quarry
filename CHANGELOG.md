@@ -10,8 +10,11 @@ a minor release may change the SQL it accepts, the library API and the command l
 ### Fixed
 
 - Spill directories left by a process that died without cleanup (SIGKILL, a crash, a second Ctrl-C)
-  no longer pile up in the temporary directory: they are named `quarry-spill-<pid>-XXXXXX`, and the
-  next query with a memory limit removes those whose process no longer exists.
+  are now removed instead of piling up in the temporary directory: they are named
+  `quarry-spill-<pid>-XXXXXX`, and the next query with a memory limit under the same spill parent
+  removes the directories of that form whose process no longer exists. Files, symlinks and other
+  names are left alone. A spill parent must not be shared between PID namespaces or hosts, which the
+  sweep cannot tell apart.
 
 ## [0.1.0] - 2026-11-21
 

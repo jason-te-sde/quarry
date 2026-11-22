@@ -268,7 +268,10 @@ TEST(SpillDirectoryTest, ItsNameCarriesThePid) {
 // only it.
 TEST(SpillDirectoryTest, ACreateRemovesTheDirectoriesOfDeadProcesses) {
   TempDir parent;
-  const fs::path dead = parent.path() / ("quarry-spill-" + std::to_string(DeadPid()) + "-AbC123");
+  const pid_t dead_pid = DeadPid();
+  ASSERT_GT(dead_pid, 0) << "fork failed";
+  ASSERT_GT(::getppid(), 0) << "no parent process to stand for a live pid";
+  const fs::path dead = parent.path() / ("quarry-spill-" + std::to_string(dead_pid) + "-AbC123");
   const fs::path live = parent.path() / ("quarry-spill-" + std::to_string(::getppid()) + "-AbC123");
   const fs::path old_style = parent.path() / "quarry-spill-AbC123";
   const fs::path other = parent.path() / "quarry-spill-12x-AbC123";
@@ -283,6 +286,68 @@ TEST(SpillDirectoryTest, ACreateRemovesTheDirectoriesOfDeadProcesses) {
   EXPECT_TRUE(fs::exists(old_style));
   EXPECT_TRUE(fs::exists(other));
   EXPECT_TRUE(fs::exists((*directory)->path()));
+}
+
+// Only quarry's own directories are removed: a name that matches in part, or an entry that is not a
+// directory, is left alone even when the pid in it is dead.
+TEST(SpillDirectoryTest, ACreateLeavesEverythingThatIsNotADeadProcessesSpillDirectory) {
+  TempDir parent;
+  const pid_t dead_pid = DeadPid();
+  ASSERT_GT(dead_pid, 0) << "fork failed";
+  const std::string dead = std::to_string(dead_pid);
+
+  // A regular file with a matching name.
+  const fs::path file = parent.path() / ("quarry-spill-" + dead + "-AbC123");
+  std::ofstream(file) << "data";
+  // A symlink with a matching name to a directory outside the sweep: the target must survive, and
+  // so must the link.
+  TempDir elsewhere;
+  const fs::path target = elsewhere.path() / "target";
+  fs::create_directories(target);
+  std::ofstream(target / "x.spill") << "data";
+  const fs::path link = parent.path() / ("quarry-spill-" + dead + "-LnK123");
+  fs::create_directory_symlink(target, link);
+  // Directories whose names are not `quarry-spill-<pid>-` and six alphanumeric characters.
+  const std::vector<std::string> names = {
+      "quarry-spill-" + dead + "-AbC12",    // suffix too short
+      "quarry-spill-" + dead + "-AbC1234",  // suffix too long
+      "quarry-spill-" + dead + "-AbC1_3",   // suffix with a character mkdtemp does not produce
+      "quarry-spill-" + dead + "-",         // no suffix
+      "quarry-spill-" + dead,               // no suffix and no dash
+      "quarry-spill-" + dead + "x-AbC123",  // junk after the pid
+      "quarry-spill-99999999999-AbC123",    // a pid that does not fit in a pid_t
+      "quarry-spill--5-AbC123",             // a negative pid
+      "quarry-spill-+" + dead + "-AbC123",  // a signed pid
+      "quarry-spill-0-AbC123",              // pid 0 is never a process to look up
+  };
+  std::vector<fs::path> directories;
+  for (const std::string& name : names) {
+    directories.push_back(parent.path() / name);
+    fs::create_directories(directories.back() / "nested");
+    std::ofstream(directories.back() / "nested" / "x.spill") << "data";
+  }
+
+  auto directory = SpillDirectory::Create(parent.path());
+  ASSERT_TRUE(directory.ok());
+  EXPECT_TRUE(fs::is_regular_file(file));
+  EXPECT_TRUE(fs::is_symlink(link));
+  EXPECT_TRUE(fs::exists(target / "x.spill"));
+  for (const fs::path& path : directories) {
+    EXPECT_TRUE(fs::exists(path / "nested" / "x.spill")) << path;
+  }
+}
+
+// kill(pid, 0) fails with EPERM for a live process of another user, which is not ESRCH: the
+// directory stays. Pid 1 exists on every system and belongs to root, so this needs a user that is
+// not root.
+TEST(SpillDirectoryTest, ACreateKeepsTheDirectoryOfAnotherUsersProcess) {
+  if (::geteuid() == 0) GTEST_SKIP() << "root may signal pid 1, so kill does not fail with EPERM";
+  TempDir parent;
+  const fs::path other_users = parent.path() / "quarry-spill-1-AbC123";
+  fs::create_directories(other_users);
+  auto directory = SpillDirectory::Create(parent.path());
+  ASSERT_TRUE(directory.ok());
+  EXPECT_TRUE(fs::exists(other_users));
 }
 
 // The directory of a query is removed whatever the outcome. The query spills a lot: the 15000
